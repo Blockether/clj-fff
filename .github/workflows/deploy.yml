@@ -98,7 +98,19 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           STATUS=$(curl -s -o /dev/null -w "%{http_code}"             "https://repo.clojars.org/com/blockether/fff/$VERSION/fff-$VERSION.jar")
           if [ "$STATUS" = "200" ]; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
-      - name: Build & Deploy to Clojars
+      - name: Build & Deploy platform native jars to Clojars
+        if: steps.check-clojars.outputs.exists != 'true'
+        env:
+          VERSION: ${{ github.ref_name }}
+          CLOJARS_USERNAME: blockether-deployer
+          CLOJARS_PASSWORD: ${{ secrets.CLOJARS_DEPLOY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for platform in linux-x64 linux-arm64 darwin-arm64 darwin-x64 windows-x64; do
+            clojure -T:build deploy-native :platform "${platform}"
+          done
+      - name: Build & Deploy main jar to Clojars
         if: steps.check-clojars.outputs.exists != 'true'
         env:
           VERSION: ${{ github.ref_name }}

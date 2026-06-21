@@ -3,11 +3,15 @@
   "Clojure binding to fff — fast typo-tolerant file/content search — through
    fff-c's C ABI using the JDK Foreign Function & Memory API."
   (:refer-clojure :exclude [search])
-  (:require [clojure.java.io :as io])
-  (:import [java.io File Closeable]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str])
+  (:import [java.io File Closeable InputStream]
            [java.lang.foreign Arena AddressLayout FunctionDescriptor Linker Linker$Option MemoryLayout MemorySegment SymbolLookup ValueLayout ValueLayout$OfBoolean ValueLayout$OfByte ValueLayout$OfInt ValueLayout$OfLong]
            [java.lang.invoke MethodHandle]
-           [java.nio.file Path]))
+           [java.net URI URL]
+           [java.net.http HttpClient HttpRequest HttpResponse HttpResponse$BodyHandlers]
+           [java.nio.file CopyOption Files Path StandardCopyOption]
+           [java.util.jar JarFile]))
 
 (set! *warn-on-reflection* true)
 
@@ -39,21 +43,88 @@
     "linux" "libfff_c.so"
     "windows" "fff_c.dll"))
 
-(defn- library-path ^Path []
-  (let [[os arch] (platform)
-        fname (lib-file-name os)
-        res (str "prebuilds/" os "-" arch "/" fname)
-        url (or (io/resource res)
-                (throw (ex-info (str "No bundled fff native library for " os "-" arch
-                                     " (missing classpath resource " res ")")
-                                {:os os :arch arch :resource res})))]
-    (if (= "file" (.getProtocol ^java.net.URL url))
+(def ^:private clojars-root "https://repo.clojars.org")
+
+(defn- configured-native-path ^Path []
+  (when-let [p (or (System/getenv "FFF_NATIVE_PATH")
+                   (System/getProperty "com.blockether.fff.native.path"))]
+    (.toPath (io/file p))))
+
+(defn- bundled-library-path ^Path [res fname]
+  (when-let [^URL url (io/resource res)]
+    (if (= "file" (.getProtocol url))
       (.toPath (io/file url))
       (let [tmp (doto (File/createTempFile "libfff_c" (subs fname (.lastIndexOf ^String fname ".")))
                   .deleteOnExit)]
         (with-open [in (io/input-stream url)]
           (io/copy in tmp))
         (.toPath tmp)))))
+
+(defn- artifact-version []
+  (str/trim (slurp (io/resource "VERSION"))))
+
+(defn- cache-root ^Path []
+  (if-let [p (or (System/getenv "FFF_CACHE_DIR")
+                 (System/getProperty "com.blockether.fff.cache-dir"))]
+    (.toPath (io/file p))
+    (.toPath (io/file (System/getProperty "user.home") ".cache" "clj-fff"))))
+
+(defn- native-artifact [platform]
+  (str "fff-native-" platform))
+
+(defn- native-jar-uri ^URI [version platform]
+  (let [artifact (native-artifact platform)]
+    (URI/create (format "%s/com/blockether/%s/%s/%s-%s.jar"
+                        clojars-root artifact version artifact version))))
+
+(defn- download-file! ^Path [^URI uri ^Path dest]
+  (Files/createDirectories (.getParent dest) (make-array java.nio.file.attribute.FileAttribute 0))
+  (let [client (HttpClient/newHttpClient)
+        request (-> (HttpRequest/newBuilder uri) (.GET) (.build))
+        response (.send client request (HttpResponse$BodyHandlers/ofFile dest))]
+    (when-not (= 200 (.statusCode ^HttpResponse response))
+      (Files/deleteIfExists dest)
+      (throw (ex-info (str "Unable to download fff native artifact from " uri
+                           " (HTTP " (.statusCode ^HttpResponse response) ")")
+                      {:uri (str uri) :status (.statusCode ^HttpResponse response)})))
+    dest))
+
+(defn- extract-native! ^Path [^Path jar-path res ^Path dest]
+  (Files/createDirectories (.getParent dest) (make-array java.nio.file.attribute.FileAttribute 0))
+  (with-open [jar (JarFile. (.toFile jar-path))]
+    (let [entry (.getEntry jar res)]
+      (when-not entry
+        (throw (ex-info (str "Native artifact is missing " res) {:jar (str jar-path) :resource res})))
+      (with-open [^InputStream in (.getInputStream jar entry)]
+        (let [^"[Ljava.nio.file.CopyOption;" opts (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING])]
+          (Files/copy in dest opts))))
+    dest))
+
+(defn- downloaded-library-path ^Path [platform res fname]
+  (when-not (#{"1" "true" "yes"} (some-> (System/getenv "FFF_DISABLE_DOWNLOAD") str/lower-case))
+    (let [version (artifact-version)
+          root (cache-root)
+          lib-path (.resolve root (str version "/" platform "/" fname))
+          jar-path (.resolve root (str version "/" (native-artifact platform) ".jar"))]
+      (if (Files/exists lib-path (make-array java.nio.file.LinkOption 0))
+        lib-path
+        (do
+          (when-not (Files/exists jar-path (make-array java.nio.file.LinkOption 0))
+            (download-file! (native-jar-uri version platform) jar-path))
+          (extract-native! jar-path res lib-path))))))
+
+(defn- library-path ^Path []
+  (let [[os arch] (platform)
+        platform (str os "-" arch)
+        fname (lib-file-name os)
+        res (str "prebuilds/" platform "/" fname)]
+    (or (configured-native-path)
+        (bundled-library-path res fname)
+        (downloaded-library-path platform res fname)
+        (throw (ex-info (str "No fff native library for " platform
+                             ". Add com.blockether/" (native-artifact platform)
+                             ", set FFF_NATIVE_PATH, or enable runtime download.")
+                        {:platform platform :resource res})))))
 
 (def ^AddressLayout ^:private addr ValueLayout/ADDRESS)
 (def ^ValueLayout$OfLong ^:private i64 ValueLayout/JAVA_LONG)
