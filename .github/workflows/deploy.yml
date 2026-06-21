@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 env:
-  FFF_REF: ${{ github.ref_name }}
+  FFF_REF: v0.9.6
 
 jobs:
   natives:
