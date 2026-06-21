@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: build + test ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64,    os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  lib: libfff_c.so,    jdk-arch: x64 }
+          - { name: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, lib: libfff_c.so,    jdk-arch: aarch64 }
+          - { name: darwin-arm64, os: macos-14,         target: aarch64-apple-darwin,      lib: libfff_c.dylib, jdk-arch: aarch64 }
+          - { name: darwin-x64,   os: macos-14,         target: x86_64-apple-darwin,       lib: libfff_c.dylib, jdk-arch: x64, rosetta: true }
+          - { name: windows-x64, os: windows-latest,  target: x86_64-pc-windows-msvc,   lib: fff_c.dll,        jdk-arch: x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Derive fff ref from resources/VERSION
+        shell: bash
+        run: echo "FFF_REF=v$(tr -d '[:space:]' < resources/VERSION)" >> "$GITHUB_ENV"
+      - name: Checkout fff source (${{ env.FFF_REF }})
+        uses: actions/checkout@v6
+        with:
+          repository: dmtrKovalenko/fff
+          ref: ${{ env.FFF_REF }}
+          path: fff-src
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache Rust build (fff-c)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fff-src
+          key: ${{ matrix.target }}-${{ env.FFF_REF }}
+      - name: Build fff-c (release, cdylib)
+        working-directory: fff-src
+        run: cargo build --release -p fff-c --target ${{ matrix.target }}
+      - name: Stage library
+        shell: bash
+        run: |
+          mkdir -p resources/prebuilds/${{ matrix.name }}
+          cp "fff-src/target/${{ matrix.target }}/release/${{ matrix.lib }}"              "resources/prebuilds/${{ matrix.name }}/${{ matrix.lib }}"
+      - name: Install Rosetta 2 (darwin-x64 cross test)
+        if: matrix.rosetta
+        run: softwareupdate --install-rosetta --agree-to-license
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          architecture: ${{ matrix.jdk-arch }}
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          cli: latest
+      - name: Run tests against real fff-c
+        run: clojure -X:test
+      - name: Build jar
+        run: clojure -T:build jar

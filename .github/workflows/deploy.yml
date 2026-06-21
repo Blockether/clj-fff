@@ -1,0 +1,107 @@
+name: Release & Deploy to Clojars
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  FFF_REF: ${{ github.ref_name }}
+
+jobs:
+  natives:
+    name: build + test ${{ matrix.name }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: linux-x64,    os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  lib: libfff_c.so,    jdk-arch: x64 }
+          - { name: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, lib: libfff_c.so,    jdk-arch: aarch64 }
+          - { name: darwin-arm64, os: macos-14,         target: aarch64-apple-darwin,      lib: libfff_c.dylib, jdk-arch: aarch64 }
+          - { name: darwin-x64,   os: macos-14,         target: x86_64-apple-darwin,       lib: libfff_c.dylib, jdk-arch: x64, rosetta: true }
+          - { name: windows-x64, os: windows-latest,  target: x86_64-pc-windows-msvc,   lib: fff_c.dll,        jdk-arch: x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Checkout fff source (${{ env.FFF_REF }})
+        uses: actions/checkout@v6
+        with:
+          repository: dmtrKovalenko/fff
+          ref: ${{ env.FFF_REF }}
+          path: fff-src
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fff-src
+          key: ${{ matrix.target }}-${{ env.FFF_REF }}
+      - name: Build fff-c
+        working-directory: fff-src
+        run: cargo build --release -p fff-c --target ${{ matrix.target }}
+      - name: Stage library
+        shell: bash
+        run: |
+          mkdir -p resources/prebuilds/${{ matrix.name }}
+          cp "fff-src/target/${{ matrix.target }}/release/${{ matrix.lib }}"              "resources/prebuilds/${{ matrix.name }}/${{ matrix.lib }}"
+      - name: Install Rosetta 2 (darwin-x64 cross test)
+        if: matrix.rosetta
+        run: softwareupdate --install-rosetta --agree-to-license
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          architecture: ${{ matrix.jdk-arch }}
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          cli: latest
+      - name: Run binding tests against real fff-c
+        run: clojure -X:test
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prebuild-${{ matrix.name }}
+          path: resources/prebuilds/${{ matrix.name }}/${{ matrix.lib }}
+          if-no-files-found: error
+
+  release:
+    name: Release & Deploy to Clojars
+    needs: natives
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download all platform libraries
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: prebuild-*
+      - name: Place native libs into resources/prebuilds
+        run: |
+          set -euo pipefail
+          for dir in artifacts/prebuild-*; do
+            name="${dir#artifacts/prebuild-}"
+            mkdir -p "resources/prebuilds/${name}"
+            cp "${dir}"/* "resources/prebuilds/${name}/"
+          done
+          find resources/prebuilds -type f -print
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          cli: latest
+      - name: Check if version exists on Clojars
+        id: check-clojars
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}"             "https://repo.clojars.org/com/blockether/fff/$VERSION/fff-$VERSION.jar")
+          if [ "$STATUS" = "200" ]; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Build & Deploy to Clojars
+        if: steps.check-clojars.outputs.exists != 'true'
+        env:
+          VERSION: ${{ github.ref_name }}
+          CLOJARS_USERNAME: blockether-deployer
+          CLOJARS_PASSWORD: ${{ secrets.CLOJARS_DEPLOY_TOKEN }}
+        run: clojure -T:build deploy
