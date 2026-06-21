@@ -5,7 +5,7 @@
   (:refer-clojure :exclude [search])
   (:require [clojure.java.io :as io])
   (:import [java.io File Closeable]
-           [java.lang.foreign Arena FunctionDescriptor Linker Linker$Option MemoryLayout MemorySegment SymbolLookup ValueLayout]
+           [java.lang.foreign Arena AddressLayout FunctionDescriptor Linker Linker$Option MemoryLayout MemorySegment SymbolLookup ValueLayout ValueLayout$OfBoolean ValueLayout$OfByte ValueLayout$OfInt ValueLayout$OfLong]
            [java.lang.invoke MethodHandle]
            [java.nio.file Path]))
 
@@ -45,8 +45,8 @@
         res (str "prebuilds/" os "-" arch "/" fname)
         url (or (io/resource res)
                 (throw (ex-info (str "No bundled fff native library for " os "-" arch
-                                  " (missing classpath resource " res ")")
-                         {:os os :arch arch :resource res})))]
+                                     " (missing classpath resource " res ")")
+                                {:os os :arch arch :resource res})))]
     (if (= "file" (.getProtocol ^java.net.URL url))
       (.toPath (io/file url))
       (let [tmp (doto (File/createTempFile "libfff_c" (subs fname (.lastIndexOf ^String fname ".")))
@@ -55,12 +55,12 @@
           (io/copy in tmp))
         (.toPath tmp)))))
 
-(def ^:private addr ValueLayout/ADDRESS)
-(def ^:private i64 ValueLayout/JAVA_LONG)
-(def ^:private i32 ValueLayout/JAVA_INT)
-(def ^:private u32 ValueLayout/JAVA_INT)
-(def ^:private u8 ValueLayout/JAVA_BYTE)
-(def ^:private bool ValueLayout/JAVA_BOOLEAN)
+(def ^AddressLayout ^:private addr ValueLayout/ADDRESS)
+(def ^ValueLayout$OfLong ^:private i64 ValueLayout/JAVA_LONG)
+(def ^ValueLayout$OfInt ^:private i32 ValueLayout/JAVA_INT)
+(def ^ValueLayout$OfInt ^:private u32 ValueLayout/JAVA_INT)
+(def ^ValueLayout$OfByte ^:private u8 ValueLayout/JAVA_BYTE)
+(def ^ValueLayout$OfBoolean ^:private bool ValueLayout/JAVA_BOOLEAN)
 
 (defn- fd [ret & args]
   (if ret
@@ -134,19 +134,19 @@
   ;; Downcalls returning ADDRESS produce a zero-length segment; reinterpret it
   ;; before reading the C `FffResult` fields.
   (let [result* (.reinterpret result 32)
-        success (.get result* bool 0)
-        err-p (.get result* addr 8)
-        handle (.get result* addr 16)
-        n (.get result* i64 24)
+        success (.get result* ^ValueLayout$OfBoolean bool 0)
+        err-p (.get result* ^AddressLayout addr 8)
+        handle (.get result* ^AddressLayout addr 16)
+        n (.get result* ^ValueLayout$OfLong i64 24)
         err (cstr err-p)]
     (invoke :free-result result)
     (if success
       {:handle handle :int n}
       (throw (ex-info (or err "fff error") {:type :fff/error})))))
 
-(defn- put-address! [^MemorySegment s off ^MemorySegment v] (.set s addr off (or v MemorySegment/NULL)))
-(defn- put-bool! [^MemorySegment s off v] (.set s bool off (boolean v)))
-(defn- put-u64! [^MemorySegment s off v] (.set s i64 off (long (or v 0))))
+(defn- put-address! [^MemorySegment s off ^MemorySegment v] (.set s ^AddressLayout addr (long off) (or v MemorySegment/NULL)))
+(defn- put-bool! [^MemorySegment s off v] (.set s ^ValueLayout$OfBoolean bool (long off) (boolean v)))
+(defn- put-u64! [^MemorySegment s off v] (.set s ^ValueLayout$OfLong i64 (long off) (long (or v 0))))
 (defn- temp-cstr [^Arena arena x]
   (if (some? x) (.allocateFrom arena (str x)) MemorySegment/NULL))
 
@@ -167,7 +167,7 @@
           ai-mode? false}}]
    (with-open [arena (Arena/ofConfined)]
      (let [opts (.allocate arena 88 8)]
-       (.set opts u32 0 create-options-version)
+       (.set opts ^ValueLayout$OfInt u32 0 (int create-options-version))
        (put-address! opts 8 (temp-cstr arena base-path))
        (put-address! opts 16 (temp-cstr arena frecency-db-path))
        (put-address! opts 24 (temp-cstr arena history-db-path))
@@ -196,7 +196,7 @@
   "Wait until the initial scan completes. Returns true on completion, false on timeout."
   ([fff] (wait-for-scan fff 30000))
   ([^Fff fff timeout-ms]
-   (pos? (:int (check-result (invoke :wait-scan (:handle fff) (long timeout-ms)))))))
+   (pos? (long (:int (check-result (invoke :wait-scan (:handle fff) (long timeout-ms))))))))
 
 (defn scan-files! [^Fff fff]
   (check-result (invoke :scan (:handle fff)))
@@ -207,9 +207,9 @@
 
 (defn track-query! [^Fff fff query file-path]
   (with-open [arena (Arena/ofConfined)]
-    (pos? (:int (check-result (invoke :track-query (:handle fff)
-                                      (temp-cstr arena query)
-                                      (temp-cstr arena file-path)))))))
+    (pos? (long (:int (check-result (invoke :track-query (:handle fff)
+                                            (temp-cstr arena query)
+                                            (temp-cstr arena file-path))))))))
 
 (defn historical-query [^Fff fff offset]
   (let [p (:handle (check-result (invoke :historical-query (:handle fff) (long offset))))
@@ -260,10 +260,10 @@
              :or {query "" max-threads 0 page-index 0 page-size 100 combo-boost-multiplier 100 min-combo-count 3}}]
   (with-open [arena (Arena/ofConfined)]
     (collect-search (:handle (check-result
-                               (invoke :search (:handle fff)
-                                       (temp-cstr arena query) (temp-cstr arena current-file)
-                                       (int max-threads) (int page-index) (int page-size)
-                                       (int combo-boost-multiplier) (int min-combo-count)))))))
+                              (invoke :search (:handle fff)
+                                      (temp-cstr arena query) (temp-cstr arena current-file)
+                                      (int max-threads) (int page-index) (int page-size)
+                                      (int combo-boost-multiplier) (int min-combo-count)))))))
 
 (defn glob
   "Glob-only path search. Options: `:pattern`, `:current-file`, `:max-threads`, `:page-index`, `:page-size`."
@@ -271,9 +271,9 @@
              :or {max-threads 0 page-index 0 page-size 100}}]
   (with-open [arena (Arena/ofConfined)]
     (collect-search (:handle (check-result
-                               (invoke :glob (:handle fff)
-                                       (temp-cstr arena pattern) (temp-cstr arena current-file)
-                                       (int max-threads) (int page-index) (int page-size)))))))
+                              (invoke :glob (:handle fff)
+                                      (temp-cstr arena pattern) (temp-cstr arena current-file)
+                                      (int max-threads) (int page-index) (int page-size)))))))
 
 (defn- grep-match [^MemorySegment m]
   {:relative-path (cstr (invoke :match-path m))
@@ -298,10 +298,10 @@
   (let [mode* (case mode :regex 1 :fuzzy 2 0)]
     (with-open [arena (Arena/ofConfined)]
       (let [result (:handle (check-result
-                              (invoke :grep (:handle fff) (temp-cstr arena query) (byte mode*)
-                                      (long max-file-size) (int max-matches-per-file) (boolean smart-case?)
-                                      (int file-offset) (int page-limit) (long time-budget-ms)
-                                      (int before-context) (int after-context) (boolean classify-definitions?))))]
+                             (invoke :grep (:handle fff) (temp-cstr arena query) (byte mode*)
+                                     (long max-file-size) (int max-matches-per-file) (boolean smart-case?)
+                                     (int file-offset) (int page-limit) (long time-budget-ms)
+                                     (int before-context) (int after-context) (boolean classify-definitions?))))]
         (try
           (let [n (invoke :grep-count result)]
             {:matches (vec (for [i (range n)] (grep-match (invoke :grep-match result (int i)))))
