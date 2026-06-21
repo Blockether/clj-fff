@@ -18,7 +18,7 @@
 ")
       (with-open [idx (fff/create {:base-path (str dir) :watch? false :enable-content-indexing? true})]
         (is (fff/wait-for-scan idx 30000))
-        (is (= (str dir) (fff/base-path idx)))
+        (is (= (.getCanonicalPath dir) (.getCanonicalPath (io/file (fff/base-path idx)))))
         (is (some #(= "alpha.clj" (:relative-path %)) (:items (fff/search idx {:query "alpha"}))))
         (is (some #(= "alpha.clj" (:relative-path %)) (:items (fff/glob idx {:pattern "*.clj"}))))
         (is (some #(= "alpha.clj" (:relative-path %)) (:matches (fff/grep idx {:query "defn" :page-limit 10}))))))))
