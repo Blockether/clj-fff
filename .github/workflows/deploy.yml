@@ -8,7 +8,11 @@ permissions:
   contents: write
 
 env:
-  FFF_REF: v0.9.6
+  # Build natives from the Blockether fork of fff, which carries the grep-content
+  # SIGBUS fix (read content into an owned buffer instead of mmap; upstream PR
+  # dmtrKovalenko/fff#626). Point back at dmtrKovalenko/fff once that merges.
+  FFF_REPO: Blockether/fff
+  FFF_REF: v0.9.6-blockether.1
 
 jobs:
   natives:
@@ -28,7 +32,7 @@ jobs:
       - name: Checkout fff source (${{ env.FFF_REF }})
         uses: actions/checkout@v6
         with:
-          repository: dmtrKovalenko/fff
+          repository: ${{ env.FFF_REPO }}
           ref: ${{ env.FFF_REF }}
           path: fff-src
       - uses: dtolnay/rust-toolchain@stable
