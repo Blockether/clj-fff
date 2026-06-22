@@ -24,13 +24,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-      - name: Derive fff ref from resources/VERSION
+      - name: Pin fff source (Blockether fork carries the grep SIGBUS fix; #626)
         shell: bash
-        run: echo "FFF_REF=v$(tr -d '[:space:]' < resources/VERSION)" >> "$GITHUB_ENV"
+        run: |
+          echo "FFF_REPO=Blockether/fff" >> "$GITHUB_ENV"
+          echo "FFF_REF=v0.9.6-blockether.1" >> "$GITHUB_ENV"
       - name: Checkout fff source (${{ env.FFF_REF }})
         uses: actions/checkout@v6
         with:
-          repository: dmtrKovalenko/fff
+          repository: ${{ env.FFF_REPO }}
           ref: ${{ env.FFF_REF }}
           path: fff-src
       - name: Rust toolchain
