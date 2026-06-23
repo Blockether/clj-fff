@@ -1,5 +1,18 @@
 ;; clj-fff — Clojure binding to fff via JDK Foreign Function & Memory API.
+;;
+;; The native lib is resolved at runtime from FFF_NATIVE_PATH, a bundled
+;; classpath resource (com.blockether/fff-native-<platform>), or — as a fallback
+;; — the matching native jar resolved through Clojure's own dependency machinery
+;; (clojure.tools.deps), which honours configured Maven repos/mirrors/settings.xml.
 {:paths ["src" "resources"]
+
+ ;; tools.deps powers the runtime native-jar fallback in
+ ;; com.blockether.fff/resolve-native-jar — the same resolver the clojure CLI
+ ;; uses, so :mvn/repos, mirrors and settings.xml are honoured instead of a
+ ;; hand-rolled HTTP GET. Loaded lazily via requiring-resolve, so it is NOT
+ ;; pulled into a native image (where the native lib is bundled/explicit).
+ :deps {org.clojure/tools.deps {:mvn/version "0.31.1629"}}
+
  :aliases
  {:build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}

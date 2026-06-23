@@ -8,8 +8,7 @@
   (:import [java.io File Closeable InputStream]
            [java.lang.foreign Arena AddressLayout FunctionDescriptor Linker Linker$Option MemoryLayout MemorySegment SymbolLookup ValueLayout ValueLayout$OfBoolean ValueLayout$OfByte ValueLayout$OfInt ValueLayout$OfLong]
            [java.lang.invoke MethodHandle]
-           [java.net URI URL]
-           [java.net.http HttpClient HttpRequest HttpResponse HttpResponse$BodyHandlers]
+           [java.net URL]
            [java.nio.file CopyOption Files Path StandardCopyOption]
            [java.util.jar JarFile]))
 
@@ -42,8 +41,6 @@
     "darwin" "libfff_c.dylib"
     "linux" "libfff_c.so"
     "windows" "fff_c.dll"))
-
-(def ^:private clojars-root "https://repo.clojars.org")
 
 (defn- configured-native-path ^Path []
   (when-let [p (or (System/getenv "FFF_NATIVE_PATH")
@@ -78,22 +75,23 @@
 (defn- native-artifact [platform]
   (str "fff-native-" platform))
 
-(defn- native-jar-uri ^URI [version platform]
-  (let [artifact (native-artifact platform)]
-    (URI/create (format "%s/com/blockether/%s/%s/%s-%s.jar"
-                        clojars-root artifact version artifact version))))
-
-(defn- download-file! ^Path [^URI uri ^Path dest]
-  (Files/createDirectories (.getParent dest) (make-array java.nio.file.attribute.FileAttribute 0))
-  (let [client (HttpClient/newHttpClient)
-        request (-> (HttpRequest/newBuilder uri) (.GET) (.build))
-        response (.send client request (HttpResponse$BodyHandlers/ofFile dest))]
-    (when-not (= 200 (.statusCode ^HttpResponse response))
-      (Files/deleteIfExists dest)
-      (throw (ex-info (str "Unable to download fff native artifact from " uri
-                           " (HTTP " (.statusCode ^HttpResponse response) ")")
-                      {:uri (str uri) :status (.statusCode ^HttpResponse response)})))
-    dest))
+(defn- resolve-native-jar ^Path [version platform]
+  "Resolve the per-platform native jar through `clojure.tools.deps` — the same
+   resolver the `clojure` CLI uses, so configured Maven repositories, mirrors and
+   `~/.m2/settings.xml` are honoured (no hand-rolled HTTP to a hardcoded repo).
+   Returns the jar's path in the local Maven repository. tools.deps is loaded via
+   `requiring-resolve` so it is only touched on this runtime download path."
+  (let [lib          (symbol "com.blockether" (native-artifact platform))
+        create-basis (or (requiring-resolve 'clojure.tools.deps/create-basis)
+                         (throw (ex-info "org.clojure/tools.deps is not on the classpath; cannot resolve the fff native artifact. Add com.blockether/<artifact>, set FFF_NATIVE_PATH, or add tools.deps."
+                                  {:lib lib})))
+        basis        (create-basis {:project nil :extra {:deps {lib {:mvn/version version}}}})
+        path         (-> basis :libs (get lib) :paths first)]
+    (when-not path
+      (throw (ex-info (str "Could not resolve " lib " " version
+                        " via Clojure's dependency resolver. Check your Maven repositories / mirrors.")
+               {:lib lib :version version})))
+    (.toPath (io/file path))))
 
 (defn- extract-native! ^Path [^Path jar-path res ^Path dest]
   (Files/createDirectories (.getParent dest) (make-array java.nio.file.attribute.FileAttribute 0))
@@ -110,14 +108,10 @@
   (when-not (#{"1" "true" "yes"} (some-> (System/getenv "FFF_DISABLE_DOWNLOAD") str/lower-case))
     (let [version (artifact-version)
           root (cache-root)
-          lib-path (.resolve root (str version "/" platform "/" fname))
-          jar-path (.resolve root (str version "/" (native-artifact platform) ".jar"))]
+          lib-path (.resolve root (str version "/" platform "/" fname))]
       (if (Files/exists lib-path (make-array java.nio.file.LinkOption 0))
         lib-path
-        (do
-          (when-not (Files/exists jar-path (make-array java.nio.file.LinkOption 0))
-            (download-file! (native-jar-uri version platform) jar-path))
-          (extract-native! jar-path res lib-path))))))
+        (extract-native! (resolve-native-jar version platform) res lib-path)))))
 
 (defn- library-path ^Path []
   (let [[os arch] (platform)
