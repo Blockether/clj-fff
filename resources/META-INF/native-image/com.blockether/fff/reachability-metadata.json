@@ -1,0 +1,25 @@
+{
+  "comment": "clj-fff binds libfff_c via the JDK Foreign Function & Memory API; JSON/strings at the boundary are read without reflection, so only the FFM downcall stubs need registering. These are the UNIQUE FunctionDescriptors built in com.blockether.fff/bind! (addr=void*, i64=jlong, i32/u32=jint, u8=jbyte, bool=jboolean, nil-return=void). The native library ships as a classpath resource prebuilds/<platform>/libfff_c.* in com.blockether/fff-native-<platform>; bundle that jar (resources glob below) or set FFF_NATIVE_PATH.",
+  "reflection": [],
+  "jni": [],
+  "resources": [
+    { "glob": "prebuilds/**" }
+  ],
+  "foreign": {
+    "downcalls": [
+      { "returnType": "void*",    "parameterTypes": ["void*"] },
+      { "returnType": "void",     "parameterTypes": ["void*"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "void*"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "void*", "void*"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "jint"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "jlong"] },
+      { "returnType": "jint",     "parameterTypes": ["void*"] },
+      { "returnType": "jlong",    "parameterTypes": ["void*"] },
+      { "returnType": "jboolean", "parameterTypes": ["void*"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "void*", "void*", "jint", "jint", "jint"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "void*", "void*", "jint", "jint", "jint", "jint", "jint"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "void*", "jbyte", "jlong", "jint", "jboolean", "jint", "jint", "jlong", "jint", "jint", "jboolean"] }
+    ],
+    "upcalls": []
+  }
+}

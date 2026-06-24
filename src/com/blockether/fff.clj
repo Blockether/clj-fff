@@ -140,7 +140,13 @@
 
 (defn- bind! []
   (let [linker (Linker/nativeLinker)
-        arena (Arena/ofShared)
+        ;; ofAuto (GC-managed, process-lifetime via the `handles` defonce), NOT
+        ;; ofShared: a SHARED arena is incompatible with Truffle runtime
+        ;; compilation, so a native image that also embeds GraalPy (e.g. vis)
+        ;; fails to build with "Arena.ofShared is not supported with runtime
+        ;; compilations". ofAuto keeps the library mapped for the process and
+        ;; needs no -H:+SharedArenaSupport flag.
+        arena (Arena/ofAuto)
         lookup (SymbolLookup/libraryLookup (library-path) arena)
         opts (make-array Linker$Option 0)
         sym (fn [name] (.orElseThrow (.find lookup name)))
