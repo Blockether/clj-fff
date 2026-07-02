@@ -8,11 +8,13 @@ permissions:
   contents: write
 
 env:
-  # Build natives from the Blockether fork of fff, which carries the grep-content
-  # SIGBUS fix (read content into an owned buffer instead of mmap; upstream PR
-  # dmtrKovalenko/fff#626). Point back at dmtrKovalenko/fff once that merges.
-  FFF_REPO: Blockether/fff
-  FFF_REF: v0.9.6-blockether.1
+  # Build natives from ORIGINAL upstream. The Blockether/fff fork existed only
+  # for the grep-content SIGBUS fix (PR dmtrKovalenko/fff#626) — upstream
+  # rejected it ("effectively got rid of the cache") and recommended disabling
+  # the mmap cache instead, which is now this binding's DEFAULT
+  # (:enable-mmap-cache? false), so the stock upstream build is safe.
+  FFF_REPO: dmtrKovalenko/fff
+  FFF_REF: v0.9.6
 
 jobs:
   natives:

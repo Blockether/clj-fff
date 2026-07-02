@@ -238,7 +238,10 @@
             cache-budget-max-files cache-budget-max-bytes cache-budget-max-file-size
             enable-fs-root-scanning? enable-home-dir-scanning?]
      :or {base-path (System/getProperty "user.dir")
-          enable-mmap-cache? true
+          ;; OFF by default: fff's mmap cache SIGBUSes the whole host
+          ;; process when a cached file is modified concurrently (vis runs
+          ;; fff in-process). Upstream's own recommendation over PR #626.
+          enable-mmap-cache? false
           enable-content-indexing? true
           watch? false
           ai-mode? false}}]
