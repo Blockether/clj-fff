@@ -27,8 +27,8 @@ jobs:
       - name: Pin fff source (Blockether fork carries the grep SIGBUS fix; #626)
         shell: bash
         run: |
-          echo "FFF_REPO=Blockether/fff" >> "$GITHUB_ENV"
-          echo "FFF_REF=v0.9.6-blockether.1" >> "$GITHUB_ENV"
+          echo "FFF_REPO=dmtrKovalenko/fff" >> "$GITHUB_ENV"
+          echo "FFF_REF=v0.9.6" >> "$GITHUB_ENV"
       - name: Checkout fff source (${{ env.FFF_REF }})
         uses: actions/checkout@v6
         with:
