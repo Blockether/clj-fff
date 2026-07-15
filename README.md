@@ -36,6 +36,9 @@ com.blockether/fff-native-darwin-x64   {:mvn/version "0.9.6"}
 com.blockether/fff-native-windows-x64  {:mvn/version "0.9.6"}
 ```
 
+Linux artifacts are built on Debian Bullseye and require no symbols newer than
+glibc 2.31, so they load on Ubuntu 22.04 and newer distributions.
+
 Normally users only depend on `com.blockether/fff`; the matching native jar is fetched from Clojars on first use. Set `FFF_DISABLE_DOWNLOAD=true` for offline-only mode, or `FFF_CACHE_DIR` / `com.blockether.fff.cache-dir` to change the native cache directory.
 
 ## Usage

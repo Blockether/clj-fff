@@ -23,8 +23,8 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { name: linux-x64,    os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  lib: libfff_c.so,    jdk-arch: x64 }
-          - { name: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, lib: libfff_c.so,    jdk-arch: aarch64 }
+          - { name: linux-x64,    os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  lib: libfff_c.so,    jdk-arch: x64,     docker-platform: linux/amd64 }
+          - { name: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, lib: libfff_c.so,    jdk-arch: aarch64, docker-platform: linux/arm64 }
           - { name: darwin-arm64, os: macos-14,         target: aarch64-apple-darwin,      lib: libfff_c.dylib, jdk-arch: aarch64 }
           - { name: darwin-x64,   os: macos-14,         target: x86_64-apple-darwin,       lib: libfff_c.dylib, jdk-arch: x64, rosetta: true }
           - { name: windows-x64, os: windows-latest,  target: x86_64-pc-windows-msvc,   lib: fff_c.dll,        jdk-arch: x64 }
@@ -38,20 +38,41 @@ jobs:
           ref: ${{ env.FFF_REF }}
           path: fff-src
       - uses: dtolnay/rust-toolchain@stable
+        if: runner.os != 'Linux'
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        if: runner.os != 'Linux'
         with:
           workspaces: fff-src
           key: ${{ matrix.target }}-${{ env.FFF_REF }}
       - name: Build fff-c
+        if: runner.os != 'Linux'
         working-directory: fff-src
-        run: cargo build --release -p fff-c --target ${{ matrix.target }}
+        run: cargo build --locked --release -p fff-c --target ${{ matrix.target }}
+      - name: Build fff-c (Linux, glibc 2.31 baseline)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          docker run --rm --platform "${{ matrix.docker-platform }}" \
+            -v "$PWD/fff-src:/work" -w /work \
+            -e RUSTUP_TOOLCHAIN=1.91.1 \
+            rust:1.91.1-bullseye \
+            cargo build --locked --release -p fff-c --target "${{ matrix.target }}"
       - name: Stage library
         shell: bash
         run: |
           mkdir -p resources/prebuilds/${{ matrix.name }}
-          cp "fff-src/target/${{ matrix.target }}/release/${{ matrix.lib }}"              "resources/prebuilds/${{ matrix.name }}/${{ matrix.lib }}"
+          cp "fff-src/target/${{ matrix.target }}/release/${{ matrix.lib }}" \
+            "resources/prebuilds/${{ matrix.name }}/${{ matrix.lib }}"
+      - name: Check Linux glibc ceiling
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          lib="resources/prebuilds/${{ matrix.name }}/${{ matrix.lib }}"
+          max_glibc="$(readelf --version-info "$lib" | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)"
+          echo "highest required glibc symbol: $max_glibc"
+          test "$(printf '%s\n' "$max_glibc" GLIBC_2.31 | sort -V | tail -1)" = GLIBC_2.31
       - name: Install Rosetta 2 (darwin-x64 cross test)
         if: matrix.rosetta
         run: softwareupdate --install-rosetta --agree-to-license
