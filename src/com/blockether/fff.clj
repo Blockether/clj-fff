@@ -14,7 +14,7 @@
 
 (set! *warn-on-reflection* true)
 
-(def ^:private create-options-version 1)
+(def ^:private create-options-version 2)
 
 (declare destroy!)
 
@@ -84,13 +84,13 @@
   (let [lib          (symbol "com.blockether" (native-artifact platform))
         create-basis (or (requiring-resolve 'clojure.tools.deps/create-basis)
                          (throw (ex-info "org.clojure/tools.deps is not on the classpath; cannot resolve the fff native artifact. Add com.blockether/<artifact>, set FFF_NATIVE_PATH, or add tools.deps."
-                                  {:lib lib})))
+                                         {:lib lib})))
         basis        (create-basis {:project nil :extra {:deps {lib {:mvn/version version}}}})
         path         (-> basis :libs (get lib) :paths first)]
     (when-not path
       (throw (ex-info (str "Could not resolve " lib " " version
-                        " via Clojure's dependency resolver. Check your Maven repositories / mirrors.")
-               {:lib lib :version version})))
+                           " via Clojure's dependency resolver. Check your Maven repositories / mirrors.")
+                      {:lib lib :version version})))
     (.toPath (io/file path))))
 
 (defn- extract-native! ^Path [^Path jar-path res ^Path dest]
@@ -231,12 +231,12 @@
   "Create and return an `Fff` instance. Options:
    `:base-path` (default current dir), `:frecency-db-path`, `:history-db-path`,
    `:enable-mmap-cache?`, `:enable-content-indexing?`, `:watch?`, `:ai-mode?`,
-   `:log-file-path`, `:log-level`, cache budget keys, and root/home scanning flags."
+   `:log-file-path`, `:log-level`, cache budget keys, `:follow-symlinks?`, and root/home scanning flags."
   ([] (create {}))
   ([{:keys [base-path frecency-db-path history-db-path enable-mmap-cache?
             enable-content-indexing? watch? ai-mode? log-file-path log-level
             cache-budget-max-files cache-budget-max-bytes cache-budget-max-file-size
-            enable-fs-root-scanning? enable-home-dir-scanning?]
+            enable-fs-root-scanning? enable-home-dir-scanning? follow-symlinks?]
      :or {base-path (System/getProperty "user.dir")
           ;; OFF by default: fff's mmap cache SIGBUSes the whole host
           ;; process when a cached file is modified concurrently (vis runs
@@ -262,6 +262,7 @@
        (put-u64! opts 72 cache-budget-max-file-size)
        (put-bool! opts 80 enable-fs-root-scanning?)
        (put-bool! opts 81 enable-home-dir-scanning?)
+       (put-bool! opts 82 follow-symlinks?)
        (->Fff (:handle (check-result (invoke :create opts))))))))
 
 (defn destroy! [^Fff fff]

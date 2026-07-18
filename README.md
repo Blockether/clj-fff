@@ -9,7 +9,7 @@ It loads fff's native `libfff_c` in-process through the JDK Foreign Function & M
 ## Install
 
 ```clojure
-com.blockether/fff {:mvn/version "0.10.0-1"}
+com.blockether/fff {:mvn/version "0.10.0-2"}
 ```
 
 Run the JVM with native access enabled:
@@ -29,11 +29,11 @@ The main jar is small and does **not** bundle every platform binary. At runtime 
 Published native artifacts use the same version as the main jar:
 
 ```clojure
-com.blockether/fff-native-linux-x64    {:mvn/version "0.10.0-1"}
-com.blockether/fff-native-linux-arm64  {:mvn/version "0.10.0-1"}
-com.blockether/fff-native-darwin-arm64 {:mvn/version "0.10.0-1"}
-com.blockether/fff-native-darwin-x64   {:mvn/version "0.10.0-1"}
-com.blockether/fff-native-windows-x64  {:mvn/version "0.10.0-1"}
+com.blockether/fff-native-linux-x64    {:mvn/version "0.10.0-2"}
+com.blockether/fff-native-linux-arm64  {:mvn/version "0.10.0-2"}
+com.blockether/fff-native-darwin-arm64 {:mvn/version "0.10.0-2"}
+com.blockether/fff-native-darwin-x64   {:mvn/version "0.10.0-2"}
+com.blockether/fff-native-windows-x64  {:mvn/version "0.10.0-2"}
 ```
 
 Linux artifacts are built on Debian Bullseye and require no symbols newer than
