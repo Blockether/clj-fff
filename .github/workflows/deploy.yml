@@ -7,14 +7,11 @@ on:
 permissions:
   contents: write
 
-env:
-  # Build natives from ORIGINAL upstream. The Blockether/fff fork existed only
-  # for the grep-content SIGBUS fix (PR dmtrKovalenko/fff#626) — upstream
-  # rejected it ("effectively got rid of the cache") and recommended disabling
-  # the mmap cache instead, which is now this binding's DEFAULT
-  # (:enable-mmap-cache? false), so the stock upstream build is safe.
-  FFF_REPO: dmtrKovalenko/fff
-  FFF_REF: v0.10.0
+# The fff source built into every native jar is pinned in ONE place:
+# `resources/FFF_SOURCE` (`<owner>/<repo>@<git-ref>`), read into FFF_REPO/FFF_REF
+# below and by scripts/build-natives.sh, so CI and local builds can never drift.
+# It points at the Blockether fork, which carries the C-ABI additions this
+# binding exposes (fff_rescan_blocking, FffCreateOptions.respect_ignore_files).
 
 jobs:
   natives:
@@ -31,6 +28,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+      - name: Pin fff source (single truth - resources/FFF_SOURCE)
+        shell: bash
+        run: |
+          src=$(tr -d '[:space:]' < resources/FFF_SOURCE)
+          echo "FFF_REPO=$(echo "$src" | cut -d@ -f1)" >> "$GITHUB_ENV"
+          echo "FFF_REF=$(echo "$src" | cut -d@ -f2)" >> "$GITHUB_ENV"
       - name: Checkout fff source (${{ env.FFF_REF }})
         uses: actions/checkout@v6
         with:

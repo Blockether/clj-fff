@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Build libfff_c and vendor it into resources/prebuilds/<os>-<arch>/.
-# Usage: scripts/build-natives.sh [FFF_REF]  # default: upstream base version from resources/VERSION
+# Usage: scripts/build-natives.sh [FFF_REF]  # default: the pinned fork ref in resources/FFF_SOURCE
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
-ref="${1:-v$(cut -d- -f1 "$here/resources/VERSION" | tr -d '[:space:]')}"
+# ONE source of truth for which fff tree every native is built from, shared
+# with .github/workflows/{ci,deploy}.yml: `<owner>/<repo>@<git-ref>`.
+source_pin="$(tr -d '[:space:]' < "$here/resources/FFF_SOURCE")"
+repo="$(echo "$source_pin" | cut -d@ -f1)"
+ref="${1:-$(echo "$source_pin" | cut -d@ -f2)}"
 src="$(mktemp -d)/fff"
 prebuilds="$here/resources/prebuilds"
 
-echo ">> Cloning dmtrKovalenko/fff @ ${ref}"
-git clone --depth 1 --branch "v${ref#v}" https://github.com/dmtrKovalenko/fff.git "$src" 2>/dev/null   || git clone --depth 1 --branch "$ref" https://github.com/dmtrKovalenko/fff.git "$src"
+echo ">> Cloning $repo @ ${ref}"
+git clone --depth 1 --branch "$ref" "https://github.com/$repo.git" "$src"
 
 vendor() { mkdir -p "$prebuilds/$1"; cp "$2" "$prebuilds/$1/$3"; echo "   vendored $1/$3"; }
 

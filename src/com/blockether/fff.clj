@@ -14,7 +14,7 @@
 
 (set! *warn-on-reflection* true)
 
-(def ^:private create-options-version 2)
+(def ^:private create-options-version 3)
 
 (declare destroy!)
 
@@ -163,6 +163,7 @@
      :grep (down "fff_live_grep" (fd addr addr addr u8 i64 u32 bool u32 u32 i64 u32 u32 bool))
      :scan (down "fff_scan_files" (fd addr addr))
      :wait-scan (down "fff_wait_for_scan" (fd addr addr i64))
+     :rescan-blocking (down "fff_rescan_blocking" (fd addr addr i64))
      :progress (down "fff_get_scan_progress" (fd addr addr))
      :base-path (down "fff_get_base_path" (fd addr addr))
      :track-query (down "fff_track_query" (fd addr addr addr addr))
@@ -231,12 +232,15 @@
   "Create and return an `Fff` instance. Options:
    `:base-path` (default current dir), `:frecency-db-path`, `:history-db-path`,
    `:enable-mmap-cache?`, `:enable-content-indexing?`, `:watch?`, `:ai-mode?`,
-   `:log-file-path`, `:log-level`, cache budget keys, `:follow-symlinks?`, and root/home scanning flags."
+   `:log-file-path`, `:log-level`, cache budget keys, `:follow-symlinks?`, root/home scanning flags,
+   and `:respect-ignore-files?` (default true — set false to index files excluded by
+   `.gitignore`/`.ignore`/`.git/info/exclude`; `.git` internals stay excluded either way)."
   ([] (create {}))
   ([{:keys [base-path frecency-db-path history-db-path enable-mmap-cache?
             enable-content-indexing? watch? ai-mode? log-file-path log-level
             cache-budget-max-files cache-budget-max-bytes cache-budget-max-file-size
-            enable-fs-root-scanning? enable-home-dir-scanning? follow-symlinks?]
+            enable-fs-root-scanning? enable-home-dir-scanning? follow-symlinks?
+            respect-ignore-files?]
      :or {base-path (System/getProperty "user.dir")
           ;; OFF by default: fff's mmap cache SIGBUSes the whole host
           ;; process when a cached file is modified concurrently (vis runs
@@ -244,7 +248,8 @@
           enable-mmap-cache? false
           enable-content-indexing? true
           watch? false
-          ai-mode? false}}]
+          ai-mode? false
+          respect-ignore-files? true}}]
    (with-open [arena (Arena/ofConfined)]
      (let [opts (.allocate arena 88 8)]
        (.set opts ^ValueLayout$OfInt u32 0 (int create-options-version))
@@ -263,6 +268,7 @@
        (put-bool! opts 80 enable-fs-root-scanning?)
        (put-bool! opts 81 enable-home-dir-scanning?)
        (put-bool! opts 82 follow-symlinks?)
+       (put-bool! opts 83 respect-ignore-files?)
        (->Fff (:handle (check-result (invoke :create opts))))))))
 
 (defn destroy! [^Fff fff]
@@ -279,9 +285,23 @@
   ([^Fff fff timeout-ms]
    (pos? (long (:int (check-result (invoke :wait-scan (:handle fff) (long timeout-ms))))))))
 
-(defn scan-files! [^Fff fff]
+(defn scan-files!
+  "Trigger an ASYNC rescan. Fire-and-forget: the request is dropped into a
+  pending flag while a previous scan's post-scan indexing is still running, and
+  `wait-for-scan` returns before the grep content index is rebuilt. Use
+  `rescan!` when the caller must see its own writes."
+  [^Fff fff]
   (check-result (invoke :scan (:handle fff)))
   nil)
+
+(defn rescan!
+  "Rescan the filesystem and BLOCK until the fresh index is queryable.
+
+  Read-your-writes: after this returns true, `search`/`grep` see files and file
+  contents written before the call. Returns false on timeout."
+  ([fff] (rescan! fff 30000))
+  ([^Fff fff timeout-ms]
+   (pos? (long (:int (check-result (invoke :rescan-blocking (:handle fff) (long timeout-ms))))))))
 
 (defn refresh-git-status! [^Fff fff]
   (:int (check-result (invoke :refresh-git-status (:handle fff)))))

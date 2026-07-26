@@ -40,3 +40,24 @@
         (is (fff/wait-for-scan idx 30000))
         ;; The file is reachable both directly and through the followed symlink.
         (is (some #(= "target.clj" (:file-name %)) (:items (fff/search idx {:query "target"}))))))))
+
+(deftest respect-ignore-files-option
+  (testing "v3 create-options: :respect-ignore-files? false indexes .gitignore'd files"
+    (let [^File dir (temp-dir "fff-ignore")]
+      ;; `.gitignore` is only honoured inside a git work tree.
+      (.mkdirs (io/file dir ".git"))
+      (spit (io/file dir ".gitignore") "hidden-by-ignore.clj\n")
+      (spit (io/file dir "hidden-by-ignore.clj") "(ns hidden)\n")
+      (spit (io/file dir "visible.clj") "(ns visible)\n")
+      (with-open [^com.blockether.fff.Fff idx (fff/create {:base-path (str dir) :watch? false})]
+        (is (fff/wait-for-scan idx 30000))
+        (let [names (set (map :file-name (:items (fff/search idx {:query "" :page-size 100}))))]
+          (is (contains? names "visible.clj"))
+          (is (not (contains? names "hidden-by-ignore.clj")))))
+      (with-open [^com.blockether.fff.Fff idx (fff/create {:base-path (str dir)
+                                                           :watch? false
+                                                           :respect-ignore-files? false})]
+        (is (fff/wait-for-scan idx 30000))
+        (let [names (set (map :file-name (:items (fff/search idx {:query "" :page-size 100}))))]
+          (is (contains? names "visible.clj"))
+          (is (contains? names "hidden-by-ignore.clj")))))))

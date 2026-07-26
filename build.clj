@@ -97,3 +97,16 @@
 (defn install [_]
   (jar nil)
   (dd/deploy {:installer :local :artifact jar-file :pom-file (b/pom-path {:lib lib :class-dir class-dir})}))
+
+(defn install-native
+  "Install ONE platform's native jar into the LOCAL Maven repository. The mirror
+  of `deploy-native` for local development: a consumer that resolves
+  `fff-native-<platform>` through tools.deps then finds the freshly built
+  library in ~/.m2 instead of downloading the released one."
+  [{:keys [platform]}]
+  (let [platform (some-> platform name)
+        jar* (native-jar {:platform platform})
+        lib* (native-lib platform)]
+    (dd/deploy {:installer :local
+                :artifact jar*
+                :pom-file (b/pom-path {:lib lib* :class-dir native-class-dir})})))

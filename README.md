@@ -4,12 +4,17 @@ Clojure binding to [**fff**](https://github.com/dmtrKovalenko/fff) — fast, typ
 
 It loads fff's native `libfff_c` in-process through the JDK Foreign Function & Memory API (`java.lang.foreign`) — no subprocess, no JNI.
 
-> ⚠️ This is a vendored binding: `com.blockether/fff X.Y.Z` targets `fff vX.Y.Z`.
+> ⚠️ This is a vendored binding. The native `libfff_c` is built from the
+> **Blockether fff fork**, pinned in one place — `resources/FFF_SOURCE`
+> (`Blockether/fff@v0.10.1-blockether.1`) — which both `scripts/build-natives.sh`
+> and the CI/release workflows read. The fork adds `fff_rescan_blocking` and
+> `FffCreateOptions.respect_ignore_files` (create-options version 3) on top of
+> upstream `v0.10.1`.
 
 ## Install
 
 ```clojure
-com.blockether/fff {:mvn/version "0.10.0-2"}
+com.blockether/fff {:mvn/version "0.11.0"}
 ```
 
 Run the JVM with native access enabled:
@@ -29,11 +34,11 @@ The main jar is small and does **not** bundle every platform binary. At runtime 
 Published native artifacts use the same version as the main jar:
 
 ```clojure
-com.blockether/fff-native-linux-x64    {:mvn/version "0.10.0-2"}
-com.blockether/fff-native-linux-arm64  {:mvn/version "0.10.0-2"}
-com.blockether/fff-native-darwin-arm64 {:mvn/version "0.10.0-2"}
-com.blockether/fff-native-darwin-x64   {:mvn/version "0.10.0-2"}
-com.blockether/fff-native-windows-x64  {:mvn/version "0.10.0-2"}
+com.blockether/fff-native-linux-x64    {:mvn/version "0.11.0"}
+com.blockether/fff-native-linux-arm64  {:mvn/version "0.11.0"}
+com.blockether/fff-native-darwin-arm64 {:mvn/version "0.11.0"}
+com.blockether/fff-native-darwin-x64   {:mvn/version "0.11.0"}
+com.blockether/fff-native-windows-x64  {:mvn/version "0.11.0"}
 ```
 
 Linux artifacts are built on Debian Bullseye and require no symbols newer than
@@ -54,6 +59,21 @@ Normally users only depend on `com.blockether/fff`; the matching native jar is f
 ```
 
 Returned values are plain Clojure maps. `create` returns a `Closeable`; use `with-open`, `close`, or `destroy!`.
+
+For a long-lived index that must see its own writes, use `rescan!` — it blocks
+until the fresh index (including the grep content index) is queryable, which
+`scan-files!` + `wait-for-scan` does not guarantee:
+
+```clojure
+(fff/with-instance [idx {:base-path "/repo"
+                         :watch? true
+                         ;; false = index files excluded by .gitignore/.ignore
+                         ;; too (.git internals stay excluded either way)
+                         :respect-ignore-files? true}]
+  (spit "/repo/new.clj" "(ns new)")
+  (fff/rescan! idx)                                  ; read-your-writes
+  (fff/grep idx {:query "(ns new)" :mode :plain}))
+```
 
 ## Develop
 
