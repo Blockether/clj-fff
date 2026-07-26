@@ -6,6 +6,13 @@
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
+(defn- git-init!
+  "fff honors `.gitignore` only inside a git work tree."
+  [^File dir]
+  (let [pb (doto (ProcessBuilder. ["git" "init" "--quiet"])
+             (.directory dir))]
+    (assert (zero? (.waitFor (.start pb))) "git init failed")))
+
 (defn- temp-dir [prefix]
   (.toFile (Files/createTempDirectory prefix (make-array FileAttribute 0))))
 
@@ -61,3 +68,42 @@
         (let [names (set (map :file-name (:items (fff/search idx {:query "" :page-size 100}))))]
           (is (contains? names "visible.clj"))
           (is (contains? names "hidden-by-ignore.clj")))))))
+
+(deftest ignore-overlay-options
+  (testing "v4 create-options: custom ignore filenames, exclude + unignore globs"
+    (let [^File dir (temp-dir "fff-overlay")
+          _ (git-init! dir)
+          paths (fn [idx]
+                  (set (map :relative-path (:items (fff/glob idx {:pattern "**" :limit 500})))))]
+      (spit (io/file dir ".gitignore") "vendor/\n")
+      (spit (io/file dir ".rgignore") "generated/\n")
+      (.mkdirs (io/file dir "vendor" "keep"))
+      (.mkdirs (io/file dir "vendor" "drop"))
+      (.mkdirs (io/file dir "generated"))
+      (spit (io/file dir "main.clj") "(ns main)\n")
+      (spit (io/file dir "secret.pem") "key\n")
+      (spit (io/file dir "generated" "out.clj") "(ns out)\n")
+      (spit (io/file dir "vendor" "keep" "lib.clj") "(ns lib)\n")
+      (spit (io/file dir "vendor" "drop" "junk.clj") "(ns junk)\n")
+
+      (testing "no overlay: .rgignore is inert, vendor/ is dropped by .gitignore"
+        (with-open [^com.blockether.fff.Fff idx (fff/create {:base-path (str dir) :watch? false})]
+          (is (fff/wait-for-scan idx 30000))
+          (let [ps (paths idx)]
+            (is (contains? ps "generated/out.clj"))
+            (is (not-any? #(clojure.string/starts-with? % "vendor/") ps)))))
+
+      (testing "overlay: .rgignore honored, *.pem excluded, vendor/keep re-included"
+        (with-open [^com.blockether.fff.Fff idx
+                    (fff/create {:base-path (str dir)
+                                 :watch? false
+                                 :custom-ignore-filenames [".rgignore"]
+                                 :exclude-globs ["*.pem"]
+                                 :unignore-globs ["vendor/keep/**"]})]
+          (is (fff/wait-for-scan idx 30000))
+          (let [ps (paths idx)]
+            (is (contains? ps "main.clj"))
+            (is (contains? ps "vendor/keep/lib.clj"))
+            (is (not (contains? ps "generated/out.clj")))
+            (is (not (contains? ps "secret.pem")))
+            (is (not (contains? ps "vendor/drop/junk.clj")))))))))

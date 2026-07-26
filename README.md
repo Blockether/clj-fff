@@ -75,6 +75,26 @@ until the fresh index (including the grep content index) is queryable, which
   (fff/grep idx {:query "(ns new)" :mode :plain}))
 ```
 
+### Ignore overlay
+
+`create` layers three optional pattern lists on top of the ignore files. They
+are honored by the scan walk **and** by the live watcher, so a re-included
+subtree does not silently vanish on the next filesystem event:
+
+```clojure
+(fff/with-instance [idx {:base-path "/repo"
+                         ;; per-directory ignore files beyond .gitignore/.ignore
+                         :custom-ignore-filenames [".rgignore"]
+                         ;; always dropped, even with :respect-ignore-files? false
+                         :exclude-globs ["*.pem" "node_modules/"]
+                         ;; kept although .gitignore excludes them (exclude wins)
+                         :unignore-globs ["vendor/keep/**"]}]
+  (fff/wait-for-scan idx)
+  (fff/glob idx {:pattern "**"}))
+```
+
+Patterns use `.gitignore` syntax and resolve against `:base-path`.
+
 ## Develop
 
 ```bash

@@ -14,7 +14,7 @@
 
 (set! *warn-on-reflection* true)
 
-(def ^:private create-options-version 3)
+(def ^:private create-options-version 4)
 
 (declare destroy!)
 
@@ -225,6 +225,14 @@
 (defn- put-address! [^MemorySegment s off ^MemorySegment v] (.set s ^AddressLayout addr (long off) (or v MemorySegment/NULL)))
 (defn- put-bool! [^MemorySegment s off v] (.set s ^ValueLayout$OfBoolean bool (long off) (boolean v)))
 (defn- put-u64! [^MemorySegment s off v] (.set s ^ValueLayout$OfLong i64 (long off) (long (or v 0))))
+(defn- lines-cstr
+  "Join a seq of overlay patterns into the newline-separated string the C ABI
+  takes. nil/empty -> nil, so the field stays NULL."
+  [xs]
+  (when (seq xs)
+    (let [joined (str/join "\n" (remove str/blank? (map str xs)))]
+      (when-not (str/blank? joined) joined))))
+
 (defn- temp-cstr [^Arena arena x]
   (if (some? x) (.allocateFrom arena (str x)) MemorySegment/NULL))
 
@@ -234,13 +242,25 @@
    `:enable-mmap-cache?`, `:enable-content-indexing?`, `:watch?`, `:ai-mode?`,
    `:log-file-path`, `:log-level`, cache budget keys, `:follow-symlinks?`, root/home scanning flags,
    and `:respect-ignore-files?` (default true — set false to index files excluded by
-   `.gitignore`/`.ignore`/`.git/info/exclude`; `.git` internals stay excluded either way)."
+   `.gitignore`/`.ignore`/`.git/info/exclude`; `.git` internals stay excluded either way).
+
+   Ignore overlay (each a seq of strings, all optional):
+   - `:custom-ignore-filenames` — extra per-directory ignore-file names to honor,
+     e.g. `[\".rgignore\"]`. The `ignore` crate registers `.gitignore`/`.ignore`
+     itself; anything else must be opted in here.
+   - `:exclude-globs` — gitignore-syntax patterns ALWAYS excluded, whatever the
+     ignore files say and even when `:respect-ignore-files?` is false.
+   - `:unignore-globs` — gitignore-syntax patterns RE-INCLUDED although an ignore
+     file excludes them (a whitelist; `:exclude-globs` still wins). No-op when
+     `:respect-ignore-files?` is false.
+   The overlay is honored by the scan walk AND by the live watcher, so a
+   re-included subtree stays in the index."
   ([] (create {}))
   ([{:keys [base-path frecency-db-path history-db-path enable-mmap-cache?
             enable-content-indexing? watch? ai-mode? log-file-path log-level
             cache-budget-max-files cache-budget-max-bytes cache-budget-max-file-size
             enable-fs-root-scanning? enable-home-dir-scanning? follow-symlinks?
-            respect-ignore-files?]
+            respect-ignore-files? custom-ignore-filenames exclude-globs unignore-globs]
      :or {base-path (System/getProperty "user.dir")
           ;; OFF by default: fff's mmap cache SIGBUSes the whole host
           ;; process when a cached file is modified concurrently (vis runs
@@ -251,7 +271,7 @@
           ai-mode? false
           respect-ignore-files? true}}]
    (with-open [arena (Arena/ofConfined)]
-     (let [opts (.allocate arena 88 8)]
+     (let [opts (.allocate arena 112 8)]
        (.set opts ^ValueLayout$OfInt u32 0 (int create-options-version))
        (put-address! opts 8 (temp-cstr arena base-path))
        (put-address! opts 16 (temp-cstr arena frecency-db-path))
@@ -269,6 +289,9 @@
        (put-bool! opts 81 enable-home-dir-scanning?)
        (put-bool! opts 82 follow-symlinks?)
        (put-bool! opts 83 respect-ignore-files?)
+       (put-address! opts 88 (temp-cstr arena (lines-cstr custom-ignore-filenames)))
+       (put-address! opts 96 (temp-cstr arena (lines-cstr exclude-globs)))
+       (put-address! opts 104 (temp-cstr arena (lines-cstr unignore-globs)))
        (->Fff (:handle (check-result (invoke :create opts))))))))
 
 (defn destroy! [^Fff fff]
