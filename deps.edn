@@ -12,7 +12,7 @@
  ;; fallback. Consumers who want that fallback add tools.deps themselves (or use
  ;; the `:download` alias); native-image consumers bundle the
  ;; `fff-native-<platform>` jar (or set FFF_NATIVE_PATH) and need neither.
- :deps {}
+ :deps {com.blockether/nativeresolver {:mvn/version "0.1.0"}}
 
  :aliases
  {;; Optional: enables the runtime native-jar DOWNLOAD fallback. Kept OUT of

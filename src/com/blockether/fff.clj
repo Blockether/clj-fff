@@ -3,14 +3,11 @@
   "Clojure binding to fff — fast typo-tolerant file/content search — through
    fff-c's C ABI using the JDK Foreign Function & Memory API."
   (:refer-clojure :exclude [search])
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str])
-  (:import [java.io File Closeable InputStream]
-           [java.lang.foreign Arena AddressLayout FunctionDescriptor Linker Linker$Option MemoryLayout MemorySegment SymbolLookup ValueLayout ValueLayout$OfBoolean ValueLayout$OfByte ValueLayout$OfInt ValueLayout$OfLong]
-           [java.lang.invoke MethodHandle]
-           [java.net URL]
-           [java.nio.file CopyOption Files Path StandardCopyOption]
-           [java.util.jar JarFile]))
+  (:require [clojure.string :as str]
+            [com.blockether.nativeresolver :as nr]
+            [com.blockether.nativeresolver.ffm :as ffm])
+  (:import [java.io Closeable]
+           [java.lang.foreign AddressLayout Arena MemorySegment ValueLayout ValueLayout$OfBoolean ValueLayout$OfInt ValueLayout$OfLong]))
 
 (set! *warn-on-reflection* true)
 
@@ -22,188 +19,75 @@
   Closeable
   (close [this] (destroy! this)))
 
-(defn- platform []
-  (let [os (.. (System/getProperty "os.name") toLowerCase)
-        arch (.. (System/getProperty "os.arch") toLowerCase)
-        os* (cond
-              (or (.contains os "mac") (.contains os "darwin")) "darwin"
-              (.contains os "linux") "linux"
-              (.contains os "win") "windows"
-              :else (throw (ex-info (str "Unsupported OS for fff: " os) {:os os})))
-        arch* (cond
-                (#{"aarch64" "arm64"} arch) "arm64"
-                (#{"x86_64" "amd64"} arch) "x64"
-                :else (throw (ex-info (str "Unsupported arch for fff: " arch) {:arch arch})))]
-    [os* arch*]))
 
-(defn- lib-file-name [os]
-  (case os
-    "darwin" "libfff_c.dylib"
-    "linux" "libfff_c.so"
-    "windows" "fff_c.dll"))
-
-(defn- configured-native-path ^Path []
-  (when-let [p (or (System/getenv "FFF_NATIVE_PATH")
-                   (System/getProperty "com.blockether.fff.native.path"))]
-    (.toPath (io/file p))))
-
-(defn- bundled-library-path ^Path [res fname]
-  (when-let [^URL url (io/resource res)]
-    (if (= "file" (.getProtocol url))
-      (.toPath (io/file url))
-      (let [tmp (doto (File/createTempFile "libfff_c" (subs fname (.lastIndexOf ^String fname ".")))
-                  .deleteOnExit)]
-        (with-open [in (io/input-stream url)]
-          (io/copy in tmp))
-        (.toPath tmp)))))
-
-(defn- artifact-version []
-  ;; Read a NAMESPACED resource. An unqualified "VERSION" at the jar root
-  ;; collides with every other lib that ships one (rift, svar, …) — whichever is
-  ;; first on the classpath wins, so a lib could resolve a FOREIGN version and try
-  ;; to download a nonexistent <lib>-native-<that-version> (HTTP 404). `fff/VERSION`
-  ;; is unique to this jar; read only it so a packaging mistake fails loudly here
-  ;; rather than silently resolving someone else's version.
-  (str/trim (slurp (io/resource "fff/VERSION"))))
-
-(defn- cache-root ^Path []
-  (if-let [p (or (System/getenv "FFF_CACHE_DIR")
-                 (System/getProperty "com.blockether.fff.cache-dir"))]
-    (.toPath (io/file p))
-    (.toPath (io/file (System/getProperty "user.home") ".cache" "clj-fff"))))
-
-(defn- native-artifact [platform]
-  (str "fff-native-" platform))
-
-(defn- resolve-native-jar ^Path [version platform]
-  "Resolve the per-platform native jar through `clojure.tools.deps` — the same
-   resolver the `clojure` CLI uses, so configured Maven repositories, mirrors and
-   `~/.m2/settings.xml` are honoured (no hand-rolled HTTP to a hardcoded repo).
-   Returns the jar's path in the local Maven repository. tools.deps is loaded via
-   `requiring-resolve` so it is only touched on this runtime download path."
-  (let [lib          (symbol "com.blockether" (native-artifact platform))
-        create-basis (or (requiring-resolve 'clojure.tools.deps/create-basis)
-                         (throw (ex-info "org.clojure/tools.deps is not on the classpath; cannot resolve the fff native artifact. Add com.blockether/<artifact>, set FFF_NATIVE_PATH, or add tools.deps."
-                                         {:lib lib})))
-        basis        (create-basis {:project nil :extra {:deps {lib {:mvn/version version}}}})
-        path         (-> basis :libs (get lib) :paths first)]
-    (when-not path
-      (throw (ex-info (str "Could not resolve " lib " " version
-                           " via Clojure's dependency resolver. Check your Maven repositories / mirrors.")
-                      {:lib lib :version version})))
-    (.toPath (io/file path))))
-
-(defn- extract-native! ^Path [^Path jar-path res ^Path dest]
-  (Files/createDirectories (.getParent dest) (make-array java.nio.file.attribute.FileAttribute 0))
-  (with-open [jar (JarFile. (.toFile jar-path))]
-    (let [entry (.getEntry jar res)]
-      (when-not entry
-        (throw (ex-info (str "Native artifact is missing " res) {:jar (str jar-path) :resource res})))
-      (with-open [^InputStream in (.getInputStream jar entry)]
-        (let [^"[Ljava.nio.file.CopyOption;" opts (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING])]
-          (Files/copy in dest opts))))
-    dest))
-
-(defn- downloaded-library-path ^Path [platform res fname]
-  (when-not (#{"1" "true" "yes"} (some-> (System/getenv "FFF_DISABLE_DOWNLOAD") str/lower-case))
-    (let [version (artifact-version)
-          root (cache-root)
-          lib-path (.resolve root (str version "/" platform "/" fname))]
-      (if (Files/exists lib-path (make-array java.nio.file.LinkOption 0))
-        lib-path
-        (extract-native! (resolve-native-jar version platform) res lib-path)))))
-
-(defn- library-path ^Path []
-  (let [[os arch] (platform)
-        platform (str os "-" arch)
-        fname (lib-file-name os)
-        res (str "prebuilds/" platform "/" fname)]
-    (or (configured-native-path)
-        (bundled-library-path res fname)
-        (downloaded-library-path platform res fname)
-        (throw (ex-info (str "No fff native library for " platform
-                             ". Add com.blockether/" (native-artifact platform)
-                             ", set FFF_NATIVE_PATH, or enable runtime download.")
-                        {:platform platform :resource res})))))
+(def ^:private native-spec
+  "How libfff_c is found. Everything derives mechanically from `:lib`:
+   FFF_NATIVE_PATH / `com.blockether.fff.native.path` (verbatim), the bundled
+   `prebuilds/<platform>/<lib>` resource shipped by
+   `com.blockether/fff-native-<platform>`, then the tools.deps download cached
+   under ~/.cache/clj-fff (FFF_DISABLE_DOWNLOAD=1 to disable). The version comes
+   from the NAMESPACED `fff/VERSION` resource."
+  (nr/spec {:lib "fff"}))
 
 (def ^AddressLayout ^:private addr ValueLayout/ADDRESS)
 (def ^ValueLayout$OfLong ^:private i64 ValueLayout/JAVA_LONG)
-(def ^ValueLayout$OfInt ^:private i32 ValueLayout/JAVA_INT)
 (def ^ValueLayout$OfInt ^:private u32 ValueLayout/JAVA_INT)
-(def ^ValueLayout$OfByte ^:private u8 ValueLayout/JAVA_BYTE)
 (def ^ValueLayout$OfBoolean ^:private bool ValueLayout/JAVA_BOOLEAN)
 
-(defn- fd [ret & args]
-  (if ret
-    (FunctionDescriptor/of ret (into-array MemoryLayout args))
-    (FunctionDescriptor/ofVoid (into-array MemoryLayout args))))
+(defonce ^:private handles
+  (delay
+    (nr/bind! native-spec
+              {:create               [:ptr "fff_create_instance_with" :ptr]
+               :destroy              [nil  "fff_destroy" :ptr]
+               :free-result          [nil  "fff_free_result" :ptr]
+               :free-string          [nil  "fff_free_string" :ptr]
+               :free-search          [nil  "fff_free_search_result" :ptr]
+               :free-grep            [nil  "fff_free_grep_result" :ptr]
+               :free-progress        [nil  "fff_free_scan_progress" :ptr]
+               :search               [:ptr "fff_search" :ptr :ptr :ptr :u32 :u32 :u32 :i32 :u32]
+               :glob                 [:ptr "fff_glob" :ptr :ptr :ptr :u32 :u32 :u32]
+               :grep                 [:ptr "fff_live_grep" :ptr :ptr :i8 :i64 :u32 :bool :u32 :u32 :i64 :u32 :u32 :bool]
+               :scan                 [:ptr "fff_scan_files" :ptr]
+               :wait-scan            [:ptr "fff_wait_for_scan" :ptr :i64]
+               :rescan-blocking      [:ptr "fff_rescan_blocking" :ptr :i64]
+               :progress             [:ptr "fff_get_scan_progress" :ptr]
+               :base-path            [:ptr "fff_get_base_path" :ptr]
+               :track-query          [:ptr "fff_track_query" :ptr :ptr :ptr]
+               :historical-query     [:ptr "fff_get_historical_query" :ptr :i64]
+               :refresh-git-status   [:ptr "fff_refresh_git_status" :ptr]
+               :health               [:ptr "fff_health_check" :ptr :ptr]
+               :search-count         [:u32 "fff_search_result_get_count" :ptr]
+               :search-total-matched [:u32 "fff_search_result_get_total_matched" :ptr]
+               :search-total-files   [:u32 "fff_search_result_get_total_files" :ptr]
+               :search-item          [:ptr "fff_search_result_get_item" :ptr :u32]
+               :search-score         [:ptr "fff_search_result_get_score" :ptr :u32]
+               :file-relative        [:ptr "fff_file_item_get_relative_path" :ptr]
+               :file-name            [:ptr "fff_file_item_get_file_name" :ptr]
+               :file-git             [:ptr "fff_file_item_get_git_status" :ptr]
+               :file-size            [:i64 "fff_file_item_get_size" :ptr]
+               :file-modified        [:i64 "fff_file_item_get_modified" :ptr]
+               :file-frecency        [:i64 "fff_file_item_get_total_frecency_score" :ptr]
+               :file-binary?         [:bool "fff_file_item_get_is_binary" :ptr]
+               :grep-count           [:u32 "fff_grep_result_get_count" :ptr]
+               :grep-total-matched   [:u32 "fff_grep_result_get_total_matched" :ptr]
+               :grep-files-searched  [:u32 "fff_grep_result_get_total_files_searched" :ptr]
+               :grep-total-files     [:u32 "fff_grep_result_get_total_files" :ptr]
+               :grep-next-offset     [:u32 "fff_grep_result_get_next_file_offset" :ptr]
+               :grep-regex-error     [:ptr "fff_grep_result_get_regex_fallback_error" :ptr]
+               :grep-match           [:ptr "fff_grep_result_get_match" :ptr :u32]
+               :match-path           [:ptr "fff_grep_match_get_relative_path" :ptr]
+               :match-file           [:ptr "fff_grep_match_get_file_name" :ptr]
+               :match-git            [:ptr "fff_grep_match_get_git_status" :ptr]
+               :match-line           [:ptr "fff_grep_match_get_line_content" :ptr]
+               :match-line-number    [:i64 "fff_grep_match_get_line_number" :ptr]
+               :match-col            [:u32 "fff_grep_match_get_col" :ptr]
+               :match-byte-offset    [:i64 "fff_grep_match_get_byte_offset" :ptr]
+               :match-definition?    [:bool "fff_grep_match_get_is_definition" :ptr]
+               :match-binary?        [:bool "fff_grep_match_get_is_binary" :ptr]})))
 
-(defn- bind! []
-  (let [linker (Linker/nativeLinker)
-        ;; ofAuto (GC-managed, process-lifetime via the `handles` defonce), NOT
-        ;; ofShared: a SHARED arena is incompatible with Truffle runtime
-        ;; compilation, so a native image that also embeds GraalPy (e.g. vis)
-        ;; fails to build with "Arena.ofShared is not supported with runtime
-        ;; compilations". ofAuto keeps the library mapped for the process and
-        ;; needs no -H:+SharedArenaSupport flag.
-        arena (Arena/ofAuto)
-        lookup (SymbolLookup/libraryLookup (library-path) arena)
-        opts (make-array Linker$Option 0)
-        sym (fn [name] (.orElseThrow (.find lookup name)))
-        down (fn [name desc] (.downcallHandle linker (sym name) desc opts))]
-    {:create (down "fff_create_instance_with" (fd addr addr))
-     :destroy (down "fff_destroy" (fd nil addr))
-     :free-result (down "fff_free_result" (fd nil addr))
-     :free-string (down "fff_free_string" (fd nil addr))
-     :free-search (down "fff_free_search_result" (fd nil addr))
-     :free-grep (down "fff_free_grep_result" (fd nil addr))
-     :free-progress (down "fff_free_scan_progress" (fd nil addr))
-     :search (down "fff_search" (fd addr addr addr addr u32 u32 u32 i32 u32))
-     :glob (down "fff_glob" (fd addr addr addr addr u32 u32 u32))
-     :grep (down "fff_live_grep" (fd addr addr addr u8 i64 u32 bool u32 u32 i64 u32 u32 bool))
-     :scan (down "fff_scan_files" (fd addr addr))
-     :wait-scan (down "fff_wait_for_scan" (fd addr addr i64))
-     :rescan-blocking (down "fff_rescan_blocking" (fd addr addr i64))
-     :progress (down "fff_get_scan_progress" (fd addr addr))
-     :base-path (down "fff_get_base_path" (fd addr addr))
-     :track-query (down "fff_track_query" (fd addr addr addr addr))
-     :historical-query (down "fff_get_historical_query" (fd addr addr i64))
-     :refresh-git-status (down "fff_refresh_git_status" (fd addr addr))
-     :health (down "fff_health_check" (fd addr addr addr))
-     :search-count (down "fff_search_result_get_count" (fd u32 addr))
-     :search-total-matched (down "fff_search_result_get_total_matched" (fd u32 addr))
-     :search-total-files (down "fff_search_result_get_total_files" (fd u32 addr))
-     :search-item (down "fff_search_result_get_item" (fd addr addr u32))
-     :search-score (down "fff_search_result_get_score" (fd addr addr u32))
-     :file-relative (down "fff_file_item_get_relative_path" (fd addr addr))
-     :file-name (down "fff_file_item_get_file_name" (fd addr addr))
-     :file-git (down "fff_file_item_get_git_status" (fd addr addr))
-     :file-size (down "fff_file_item_get_size" (fd i64 addr))
-     :file-modified (down "fff_file_item_get_modified" (fd i64 addr))
-     :file-frecency (down "fff_file_item_get_total_frecency_score" (fd i64 addr))
-     :file-binary? (down "fff_file_item_get_is_binary" (fd bool addr))
-     :grep-count (down "fff_grep_result_get_count" (fd u32 addr))
-     :grep-total-matched (down "fff_grep_result_get_total_matched" (fd u32 addr))
-     :grep-files-searched (down "fff_grep_result_get_total_files_searched" (fd u32 addr))
-     :grep-total-files (down "fff_grep_result_get_total_files" (fd u32 addr))
-     :grep-next-offset (down "fff_grep_result_get_next_file_offset" (fd u32 addr))
-     :grep-regex-error (down "fff_grep_result_get_regex_fallback_error" (fd addr addr))
-     :grep-match (down "fff_grep_result_get_match" (fd addr addr u32))
-     :match-path (down "fff_grep_match_get_relative_path" (fd addr addr))
-     :match-file (down "fff_grep_match_get_file_name" (fd addr addr))
-     :match-git (down "fff_grep_match_get_git_status" (fd addr addr))
-     :match-line (down "fff_grep_match_get_line_content" (fd addr addr))
-     :match-line-number (down "fff_grep_match_get_line_number" (fd i64 addr))
-     :match-col (down "fff_grep_match_get_col" (fd u32 addr))
-     :match-byte-offset (down "fff_grep_match_get_byte_offset" (fd i64 addr))
-     :match-definition? (down "fff_grep_match_get_is_definition" (fd bool addr))
-     :match-binary? (down "fff_grep_match_get_is_binary" (fd bool addr))}))
-
-(defonce ^:private handles (delay (bind!)))
-(defn- h [k] (get @handles k))
-(defn- invoke [k & args] (.invokeWithArguments ^MethodHandle (h k) (object-array args)))
-(defn- null? [^MemorySegment p] (or (nil? p) (= 0 (.address p))))
-(defn- cstr [^MemorySegment p] (when-not (null? p) (.getString (.reinterpret p Long/MAX_VALUE) 0)))
+(defn- invoke [k & args] (apply nr/invoke @handles k args))
+(defn- null? [^MemorySegment p] (ffm/null? p))
+(defn- cstr [^MemorySegment p] (ffm/c-string p))
 (defn- native-bool [x] (if x true false))
 
 (defn- check-result [^MemorySegment result]
