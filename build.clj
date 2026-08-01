@@ -20,7 +20,7 @@
     (cond
       (and v (str/starts-with? v "v")) (subs v 1)
       v v
-      :else (str (str/trim (slurp "resources/VERSION")) "-SNAPSHOT"))))
+      :else (str (str/trim (slurp "resources/FFF_VERSION")) "-SNAPSHOT"))))
 (def class-dir "target/classes")
 (def native-class-dir "target/native-classes")
 (def jar-file (format "target/%s.jar" (name lib)))

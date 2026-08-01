@@ -19,7 +19,6 @@
   Closeable
   (close [this] (destroy! this)))
 
-
 (def ^:private native-spec
   "How libfff_c is found. Everything derives mechanically from `:lib`:
    FFF_NATIVE_PATH / `com.blockether.fff.native.path` (verbatim), the bundled
@@ -42,9 +41,13 @@
                :free-result          [nil  "fff_free_result" :ptr]
                :free-string          [nil  "fff_free_string" :ptr]
                :free-search          [nil  "fff_free_search_result" :ptr]
+               :free-directories     [nil  "fff_free_dir_search_result" :ptr]
+               :free-mixed           [nil  "fff_free_mixed_search_result" :ptr]
                :free-grep            [nil  "fff_free_grep_result" :ptr]
                :free-progress        [nil  "fff_free_scan_progress" :ptr]
                :search               [:ptr "fff_search" :ptr :ptr :ptr :u32 :u32 :u32 :i32 :u32]
+               :directories          [:ptr "fff_search_directories" :ptr :ptr :ptr :u32 :u32 :u32]
+               :mixed                [:ptr "fff_search_mixed" :ptr :ptr :ptr :u32 :u32 :u32 :i32 :u32]
                :glob                 [:ptr "fff_glob" :ptr :ptr :ptr :u32 :u32 :u32]
                :grep                 [:ptr "fff_live_grep" :ptr :ptr :i8 :i64 :u32 :bool :u32 :u32 :i64 :u32 :u32 :bool]
                :scan                 [:ptr "fff_scan_files" :ptr]
@@ -68,6 +71,28 @@
                :file-modified        [:i64 "fff_file_item_get_modified" :ptr]
                :file-frecency        [:i64 "fff_file_item_get_total_frecency_score" :ptr]
                :file-binary?         [:bool "fff_file_item_get_is_binary" :ptr]
+               :directories-count    [:u32 "fff_dir_search_result_get_count" :ptr]
+               :directories-total-matched [:u32 "fff_dir_search_result_get_total_matched" :ptr]
+               :directories-total    [:u32 "fff_dir_search_result_get_total_dirs" :ptr]
+               :directories-item     [:ptr "fff_dir_search_result_get_item" :ptr :u32]
+               :directory-relative   [:ptr "fff_dir_item_get_relative_path" :ptr]
+               :directory-name       [:ptr "fff_dir_item_get_dir_name" :ptr]
+               :directory-frecency   [:i32 "fff_dir_item_get_max_access_frecency" :ptr]
+               :mixed-count          [:u32 "fff_mixed_search_result_get_count" :ptr]
+               :mixed-total-matched  [:u32 "fff_mixed_search_result_get_total_matched" :ptr]
+               :mixed-total-files    [:u32 "fff_mixed_search_result_get_total_files" :ptr]
+               :mixed-total-dirs     [:u32 "fff_mixed_search_result_get_total_dirs" :ptr]
+               :mixed-item           [:ptr "fff_mixed_search_result_get_item" :ptr :u32]
+               :mixed-directory?     [:bool "fff_mixed_item_get_is_directory" :ptr]
+               :mixed-relative       [:ptr "fff_mixed_item_get_relative_path" :ptr]
+               :mixed-name           [:ptr "fff_mixed_item_get_display_name" :ptr]
+               :mixed-git            [:ptr "fff_mixed_item_get_git_status" :ptr]
+               :mixed-size           [:i64 "fff_mixed_item_get_size" :ptr]
+               :mixed-modified       [:i64 "fff_mixed_item_get_modified" :ptr]
+               :mixed-access-frecency [:i64 "fff_mixed_item_get_access_frecency_score" :ptr]
+               :mixed-modification-frecency [:i64 "fff_mixed_item_get_modification_frecency_score" :ptr]
+               :mixed-frecency       [:i64 "fff_mixed_item_get_total_frecency_score" :ptr]
+               :mixed-binary?        [:bool "fff_mixed_item_get_is_binary" :ptr]
                :grep-count           [:u32 "fff_grep_result_get_count" :ptr]
                :grep-total-matched   [:u32 "fff_grep_result_get_total_matched" :ptr]
                :grep-files-searched  [:u32 "fff_grep_result_get_total_files_searched" :ptr]
@@ -282,6 +307,73 @@
                               (invoke :glob (:handle fff)
                                       (temp-cstr arena pattern) (temp-cstr arena current-file)
                                       (int max-threads) (int page-index) (int page-size)))))))
+
+(defn- directory-path [path]
+  (if (and (seq path) (.endsWith ^String path "/"))
+    (subs path 0 (dec (count path)))
+    path))
+
+(defn- directory-item [^MemorySegment item]
+  {:relative-path (directory-path (cstr (invoke :directory-relative item)))
+   :dir-name (cstr (invoke :directory-name item))
+   :max-access-frecency (invoke :directory-frecency item)})
+
+(defn- collect-directories [^MemorySegment result]
+  (try
+    (let [n (invoke :directories-count result)]
+      {:items (vec (for [i (range n)] (directory-item (invoke :directories-item result (int i)))))
+       :count n
+       :total-matched (invoke :directories-total-matched result)
+       :total-dirs (invoke :directories-total result)})
+    (finally
+      (invoke :free-directories result))))
+
+(defn search-directories
+  "Fuzzy directory search over fff's live directory index. Options: `:query`,
+   `:current-file`, `:max-threads`, `:page-index`, and `:page-size`."
+  [^Fff fff {:keys [query current-file max-threads page-index page-size]
+             :or {query "" max-threads 0 page-index 0 page-size 100}}]
+  (with-open [arena (Arena/ofConfined)]
+    (collect-directories (:handle (check-result
+                                   (invoke :directories (:handle fff)
+                                           (temp-cstr arena query) (temp-cstr arena current-file)
+                                           (int max-threads) (int page-index) (int page-size)))))))
+
+(defn- mixed-item [^MemorySegment item]
+  (let [directory? (native-bool (invoke :mixed-directory? item))
+        relative-path (cstr (invoke :mixed-relative item))]
+    {:directory? directory?
+     :relative-path (if directory? (directory-path relative-path) relative-path)
+     :display-name (cstr (invoke :mixed-name item))
+     :git-status (cstr (invoke :mixed-git item))
+     :size (invoke :mixed-size item)
+     :modified (invoke :mixed-modified item)
+     :access-frecency-score (invoke :mixed-access-frecency item)
+     :modification-frecency-score (invoke :mixed-modification-frecency item)
+     :frecency-score (invoke :mixed-frecency item)
+     :binary? (native-bool (invoke :mixed-binary? item))}))
+
+(defn- collect-mixed [^MemorySegment result]
+  (try
+    (let [n (invoke :mixed-count result)]
+      {:items (vec (for [i (range n)] (mixed-item (invoke :mixed-item result (int i)))))
+       :count n
+       :total-matched (invoke :mixed-total-matched result)
+       :total-files (invoke :mixed-total-files result)
+       :total-dirs (invoke :mixed-total-dirs result)})
+    (finally
+      (invoke :free-mixed result))))
+
+(defn search-mixed
+  "Fuzzy file-and-directory search over fff's live indexes. Options mirror `search`."
+  [^Fff fff {:keys [query current-file max-threads page-index page-size combo-boost-multiplier min-combo-count]
+             :or {query "" max-threads 0 page-index 0 page-size 100 combo-boost-multiplier 100 min-combo-count 3}}]
+  (with-open [arena (Arena/ofConfined)]
+    (collect-mixed (:handle (check-result
+                             (invoke :mixed (:handle fff)
+                                     (temp-cstr arena query) (temp-cstr arena current-file)
+                                     (int max-threads) (int page-index) (int page-size)
+                                     (int combo-boost-multiplier) (int min-combo-count)))))))
 
 (defn- grep-match [^MemorySegment m]
   {:relative-path (cstr (invoke :match-path m))

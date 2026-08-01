@@ -1,5 +1,6 @@
 (ns com.blockether.fff-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [com.blockether.fff :as fff])
   (:import [java.io File]
@@ -30,6 +31,28 @@
         (is (some #(= "alpha.clj" (:relative-path %)) (:items (fff/search idx {:query "alpha"}))))
         (is (some #(= "alpha.clj" (:relative-path %)) (:items (fff/glob idx {:pattern "*.clj"}))))
         (is (some #(= "alpha.clj" (:relative-path %)) (:matches (fff/grep idx {:query "defn" :page-limit 10}))))))))
+
+(deftest directory-and-mixed-searches
+  (testing "directory searches retain empty directories and mixed searches preserve item kinds"
+    (let [^File dir (temp-dir "fff-directories")]
+      (.mkdirs (io/file dir "empty"))
+      (.mkdirs (io/file dir "nested" "child"))
+      (spit (io/file dir "nested" "child" "alpha.clj") "(ns alpha)\n")
+      (with-open [^com.blockether.fff.Fff idx (fff/create {:base-path (str dir) :watch? false})]
+        (is (fff/wait-for-scan idx 30000))
+        (let [directories (fff/search-directories idx {:query "" :page-size 100})
+              directory-paths (set (map :relative-path (:items directories)))
+              mixed (fff/search-mixed idx {:query "" :page-size 100})
+              mixed-by-path (into {} (map (juxt :relative-path identity) (:items mixed)))]
+          (is (contains? directory-paths "empty"))
+          (is (contains? directory-paths "nested"))
+          (is (contains? directory-paths "nested/child"))
+          (is (= (:count directories) (count (:items directories))))
+          (is (<= (:count directories) (:total-matched directories)))
+          (is (true? (get-in mixed-by-path ["empty" :directory?])))
+          (is (false? (get-in mixed-by-path ["nested/child/alpha.clj" :directory?])))
+          (is (= (:count mixed) (count (:items mixed))))
+          (is (<= (:count mixed) (:total-matched mixed))))))))
 
 (deftest follow-symlinks-option
   (testing "v2 create-options: :follow-symlinks? is accepted and follows a symlinked dir"
@@ -91,7 +114,7 @@
           (is (fff/wait-for-scan idx 30000))
           (let [ps (paths idx)]
             (is (contains? ps "generated/out.clj"))
-            (is (not-any? #(clojure.string/starts-with? % "vendor/") ps)))))
+            (is (not-any? #(str/starts-with? % "vendor/") ps)))))
 
       (testing "overlay: .rgignore honored, *.pem excluded, vendor/keep re-included"
         (with-open [^com.blockether.fff.Fff idx
