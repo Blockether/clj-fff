@@ -108,7 +108,16 @@
                :match-col            [:u32 "fff_grep_match_get_col" :ptr]
                :match-byte-offset    [:i64 "fff_grep_match_get_byte_offset" :ptr]
                :match-definition?    [:bool "fff_grep_match_get_is_definition" :ptr]
-               :match-binary?        [:bool "fff_grep_match_get_is_binary" :ptr]})))
+               :match-binary?        [:bool "fff_grep_match_get_is_binary" :ptr]
+               ;; Context lines fff ALREADY captured for `:before-context` /
+               ;; `:after-context`. Without these accessors the native side
+               ;; collected them and Clojure threw them away, so every caller
+               ;; had to re-read the file in the JVM just to rebuild context it
+               ;; had already paid for.
+               :match-before-count   [:u32 "fff_grep_match_get_context_before_count" :ptr]
+               :match-before-line    [:ptr "fff_grep_match_get_context_before" :ptr :u32]
+               :match-after-count    [:u32 "fff_grep_match_get_context_after_count" :ptr]
+               :match-after-line     [:ptr "fff_grep_match_get_context_after" :ptr :u32]})))
 
 (defn- invoke [k & args] (apply nr/invoke @handles k args))
 (defn- null? [^MemorySegment p] (ffm/null? p))
@@ -375,6 +384,21 @@
                                      (int max-threads) (int page-index) (int page-size)
                                      (int combo-boost-multiplier) (int min-combo-count)))))))
 
+(defn- context-lines
+  "The context lines fff captured on ONE match, in file order. `count-k` and
+   `line-k` are the bound count/line accessors; a null line pointer ends the
+   vector, since the native accessor returns null past the captured window.
+   Empty when the grep asked for no context."
+  [^MemorySegment m count-k line-k]
+  (let [n (long (invoke count-k m))]
+    (loop [i 0 acc (transient [])]
+      (if (>= i n)
+        (persistent! acc)
+        (let [^MemorySegment p (invoke line-k m (int i))]
+          (if (null? p)
+            (persistent! acc)
+            (recur (inc i) (conj! acc (cstr p)))))))))
+
 (defn- grep-match [^MemorySegment m]
   {:relative-path (cstr (invoke :match-path m))
    :file-name (cstr (invoke :match-file m))
@@ -384,7 +408,11 @@
    :col (invoke :match-col m)
    :byte-offset (invoke :match-byte-offset m)
    :definition? (native-bool (invoke :match-definition? m))
-   :binary? (native-bool (invoke :match-binary? m))})
+   :binary? (native-bool (invoke :match-binary? m))
+   ;; `:before-context`/`:after-context` lines, nearest-last / nearest-first as
+   ;; fff emits them. Empty vectors when no context was requested.
+   :context-before (context-lines m :match-before-count :match-before-line)
+   :context-after (context-lines m :match-after-count :match-after-line)})
 
 (defn grep
   "Content search. `:mode` is `:plain` (default), `:regex`, or `:fuzzy`.

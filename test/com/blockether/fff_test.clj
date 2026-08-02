@@ -130,3 +130,26 @@
             (is (not (contains? ps "generated/out.clj")))
             (is (not (contains? ps "secret.pem")))
             (is (not (contains? ps "vendor/drop/junk.clj")))))))))
+
+(deftest grep-returns-native-context-lines
+  (testing "context lines requested from fff-c reach Clojure instead of being dropped"
+    (let [^File dir (temp-dir "fff-grep-context")]
+      (spit (io/file dir "ctx.txt")
+            (str/join "\n" ["L1" "L2" "L3 ZZNEEDLEZZ" "L4" "L5"]))
+      (with-open [^com.blockether.fff.Fff idx (fff/create {:base-path (str dir)
+                                                           :watch? false
+                                                           :enable-content-indexing? true})]
+        (is (fff/wait-for-scan idx 30000))
+        (let [hit (first (:matches (fff/grep idx {:query "ZZNEEDLEZZ"
+                                                  :page-limit 10
+                                                  :before-context 2
+                                                  :after-context 2})))]
+          (is (some? hit))
+          (is (= "L3 ZZNEEDLEZZ" (:line-content hit)))
+          (is (= 3 (:line-number hit)))
+          (is (= ["L1" "L2"] (:context-before hit)))
+          (is (= ["L4" "L5"] (:context-after hit))))
+        (testing "no context requested -> empty vectors, never nil"
+          (let [hit (first (:matches (fff/grep idx {:query "ZZNEEDLEZZ" :page-limit 10})))]
+            (is (= [] (:context-before hit)))
+            (is (= [] (:context-after hit)))))))))
