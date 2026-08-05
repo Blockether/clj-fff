@@ -117,7 +117,20 @@
                :match-before-count   [:u32 "fff_grep_match_get_context_before_count" :ptr]
                :match-before-line    [:ptr "fff_grep_match_get_context_before" :ptr :u32]
                :match-after-count    [:u32 "fff_grep_match_get_context_after_count" :ptr]
-               :match-after-line     [:ptr "fff_grep_match_get_context_after" :ptr :u32]})))
+               :match-after-line     [:ptr "fff_grep_match_get_context_after" :ptr :u32]
+               ;; Stateless directory listing (`fff_list_directory`): no index, no
+               ;; instance, and therefore allowed in a filesystem ROOT or a HOME
+               ;; directory, where `fff_create_instance_with` refuses to scan.
+               :list-directory       [:ptr "fff_list_directory" :ptr :u32 :bool :bool :bool]
+               :free-list            [nil  "fff_free_list_result" :ptr]
+               :list-count           [:u32 "fff_list_result_get_count" :ptr]
+               :list-item            [:ptr "fff_list_result_get_item" :ptr :u32]
+               :list-relative        [:ptr "fff_list_item_get_relative_path" :ptr]
+               :list-name            [:ptr "fff_list_item_get_name" :ptr]
+               :list-depth           [:u32 "fff_list_item_get_depth" :ptr]
+               :list-dir?            [:bool "fff_list_item_get_is_dir" :ptr]
+               :list-size            [:i64 "fff_list_item_get_size" :ptr]
+               :list-modified        [:i64 "fff_list_item_get_modified" :ptr]})))
 
 (defn- invoke [k & args] (apply nr/invoke @handles k args))
 (defn- null? [^MemorySegment p] (ffm/null? p))
@@ -441,3 +454,39 @@
              :regex-fallback-error (cstr (invoke :grep-regex-error result))})
           (finally
             (invoke :free-grep result)))))))
+
+(defn- list-item [^MemorySegment item]
+  {:relative-path (cstr (invoke :list-relative item))
+   :name (cstr (invoke :list-name item))
+   :depth (invoke :list-depth item)
+   :dir? (native-bool (invoke :list-dir? item))
+   :size (invoke :list-size item)
+   :modified (invoke :list-modified item)})
+
+(defn list-directory
+  "List `path` itself — one bounded, ignore-aware directory walk, sorted by
+   relative path. Stateless: it needs no `Fff` instance and no index, so it is
+   the ONE fff entry point that works in a filesystem root or a home directory,
+   which `create` refuses to scan.
+
+   Options: `:max-depth` (default 1, the immediate children; 0 means unlimited),
+   `:include-hidden?` (default false — dotfiles are omitted), and
+   `:respect-ignore-files?` (default true — `.gitignore`/`.ignore` and fff's own
+   cache-directory rules apply), `:follow-symlinks?` (default false — a symlinked
+   directory is listed but never descended).
+
+   Returns a vector of `{:relative-path :name :depth :dir? :size :modified}`.
+   Throws when `path` is missing or is not a directory."
+  ([path] (list-directory path {}))
+  ([path {:keys [max-depth include-hidden? respect-ignore-files? follow-symlinks?]
+          :or {max-depth 1 include-hidden? false respect-ignore-files? true follow-symlinks? false}}]
+   (with-open [arena (Arena/ofConfined)]
+     (let [result (:handle (check-result
+                            (invoke :list-directory (temp-cstr arena path)
+                                    (int max-depth) (boolean include-hidden?)
+                                    (boolean respect-ignore-files?) (boolean follow-symlinks?))))]
+       (try
+         (vec (for [i (range (invoke :list-count result))]
+                (list-item (invoke :list-item result (int i)))))
+         (finally
+           (invoke :free-list result)))))))

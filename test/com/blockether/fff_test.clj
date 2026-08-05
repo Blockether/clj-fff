@@ -153,3 +153,33 @@
           (let [hit (first (:matches (fff/grep idx {:query "ZZNEEDLEZZ" :page-limit 10})))]
             (is (= [] (:context-before hit)))
             (is (= [] (:context-after hit)))))))))
+
+(deftest list-directory-without-an-index
+  (testing "stateless listing: bounded depth, ignore-aware, dotfiles on request"
+    (let [^File dir (temp-dir "fff-list")]
+      (git-init! dir)
+      (spit (io/file dir ".gitignore") "ignored.txt\n")
+      (spit (io/file dir "alpha.clj") "(ns alpha)\n")
+      (spit (io/file dir "ignored.txt") "nope\n")
+      (spit (io/file dir ".hidden") "psst\n")
+      (.mkdirs (io/file dir "nested" "child"))
+      (spit (io/file dir "nested" "child" "beta.clj") "(ns beta)\n")
+      (let [names (fn [opts] (set (map :relative-path (fff/list-directory (str dir) opts))))]
+        (is (= #{"alpha.clj" "nested"} (names {})))
+        (is (contains? (names {:include-hidden? true}) ".hidden"))
+        (is (contains? (names {:respect-ignore-files? false}) "ignored.txt"))
+        (is (contains? (names {:max-depth 3}) "nested/child/beta.clj")))
+      (let [entries (fff/list-directory (str dir))
+            by-path (into {} (map (juxt :relative-path identity) entries))]
+        (is (true? (:dir? (get by-path "nested"))))
+        (is (false? (:dir? (get by-path "alpha.clj"))))
+        (is (= "alpha.clj" (:name (get by-path "alpha.clj"))))
+        (is (= 1 (:depth (get by-path "alpha.clj"))))
+        (is (pos? (:size (get by-path "alpha.clj"))))
+        (is (pos? (:modified (get by-path "alpha.clj"))))))))
+
+(deftest list-directory-in-a-filesystem-root-or-home
+  (testing "the places an fff INDEX refuses: listing them still works"
+    (is (seq (fff/list-directory "/")))
+    (is (seq (fff/list-directory (System/getProperty "user.home") {:include-hidden? true})))
+    (is (thrown? clojure.lang.ExceptionInfo (fff/list-directory "/definitely/not/here")))))

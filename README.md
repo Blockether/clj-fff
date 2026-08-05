@@ -94,6 +94,24 @@ subtree does not silently vanish on the next filesystem event:
 
 Patterns use `.gitignore` syntax and resolve against `:base-path`.
 
+### Listing a directory
+
+`list-directory` is the one entry point that needs no instance and no index. It
+is a bounded, ignore-aware walk of the directory you name, so it also works in a
+filesystem root or a home directory — the two places `create` refuses to scan:
+
+```clojure
+(fff/list-directory "/")                              ; immediate children
+(fff/list-directory (System/getProperty "user.home")
+                    {:max-depth 2                     ; 0 = unlimited
+                     :include-hidden? true            ; dotfiles
+                     :respect-ignore-files? true      ; .gitignore/.ignore
+                     :follow-symlinks? false})        ; list, never descend
+```
+
+Each entry is `{:relative-path :name :depth :dir? :size :modified}`, sorted by
+relative path.
+
 ## Develop
 
 ```bash
