@@ -17,6 +17,17 @@
 (defn- temp-dir [prefix]
   (.toFile (Files/createTempDirectory prefix (make-array FileAttribute 0))))
 
+(deftest library-specific-version-resource
+  (testing "native resolution reads FFF_VERSION, never a generic VERSION resource"
+    (let [resource (io/resource "FFF_VERSION")
+          native-spec @(ns-resolve 'com.blockether.fff 'native-spec)]
+      (is (some? resource))
+      (is (= "FFF_VERSION" (:version-resource native-spec)))
+      (is (= (str/trim (slurp (io/file "resources/FFF_VERSION")))
+             (str/trim (slurp resource))))
+      (is (nil? (io/resource "fff/VERSION")))
+      (is (nil? (io/resource "VERSION"))))))
+
 (deftest binding-loads-and-searches
   (testing "real fff-c native binding: index, fuzzy search, glob, and grep"
     (let [^File dir (temp-dir "fff-src")]

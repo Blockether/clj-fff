@@ -48,13 +48,10 @@
   ;; Ship the GraalVM native-image config (FFM downcalls + prebuilds glob) so a
   ;; downstream native-image build (e.g. vis) picks it up automatically.
   (b/copy-dir {:src-dirs ["resources/META-INF"] :target-dir (str class-dir "/META-INF")})
-  ;; Ship the version under a NAMESPACED resource path (fff/VERSION), not the
-  ;; jar root, so it can't collide with other libs' `VERSION` on a shared
-  ;; classpath (which made a sibling lib resolve a foreign version and 404 the
-  ;; native download).
-  (let [vfile (io/file class-dir "fff" "VERSION")]
-    (io/make-parents vfile)
-    (spit vfile version))
+  ;; The library name belongs in the FILE name. A generic `VERSION` resource
+  ;; can collide with any dependency on a shared classpath, while FFF_VERSION
+  ;; is both unambiguous and identical in a source checkout and a built jar.
+  (spit (io/file class-dir "FFF_VERSION") version)
   (b/jar {:class-dir class-dir :jar-file jar-file})
   (println "Built:" jar-file "version:" version))
 

@@ -25,8 +25,8 @@
    `prebuilds/<platform>/<lib>` resource shipped by
    `com.blockether/fff-native-<platform>`, then the tools.deps download cached
    under ~/.cache/clj-fff (FFF_DISABLE_DOWNLOAD=1 to disable). The version comes
-   from the NAMESPACED `fff/VERSION` resource."
-  (nr/spec {:lib "fff"}))
+   from the library-specific `FFF_VERSION` resource."
+  (nr/spec {:lib "fff" :version-resource "FFF_VERSION"}))
 
 (def ^AddressLayout ^:private addr ValueLayout/ADDRESS)
 (def ^ValueLayout$OfLong ^:private i64 ValueLayout/JAVA_LONG)

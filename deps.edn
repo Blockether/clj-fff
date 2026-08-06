@@ -17,7 +17,7 @@
  :aliases
  {;; Optional: enables the runtime native-jar DOWNLOAD fallback. Kept OUT of
   ;; `:deps` so tools.deps + its cognitect.aws tail never reach a native image.
-  :download {:deps {org.clojure/tools.deps {:mvn/version "0.31.1629"}}}
+  :download {:extra-deps {org.clojure/tools.deps {:mvn/version "0.31.1629"}}}
 
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.9"}
