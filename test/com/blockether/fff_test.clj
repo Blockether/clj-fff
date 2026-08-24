@@ -109,16 +109,20 @@
           _ (git-init! dir)
           paths (fn [idx]
                   (set (map :relative-path (:items (fff/glob idx {:pattern "**" :limit 500})))))]
-      (spit (io/file dir ".gitignore") "vendor/\n")
+      (spit (io/file dir ".gitignore") "vendor/\n.cpcache/\nsrc/.cpcache/\n")
       (spit (io/file dir ".rgignore") "generated/\n")
       (.mkdirs (io/file dir "vendor" "keep"))
       (.mkdirs (io/file dir "vendor" "drop"))
       (.mkdirs (io/file dir "generated"))
+      (.mkdirs (io/file dir ".cpcache"))
+      (.mkdirs (io/file dir "src" ".cpcache"))
       (spit (io/file dir "main.clj") "(ns main)\n")
       (spit (io/file dir "secret.pem") "key\n")
       (spit (io/file dir "generated" "out.clj") "(ns out)\n")
       (spit (io/file dir "vendor" "keep" "lib.clj") "(ns lib)\n")
       (spit (io/file dir "vendor" "drop" "junk.clj") "(ns junk)\n")
+      (spit (io/file dir ".cpcache" "root.edn") "cache\n")
+      (spit (io/file dir "src" ".cpcache" "nested.edn") "cache\n")
 
       (testing "no overlay: .rgignore is inert, vendor/ is dropped by .gitignore"
         (with-open [^com.blockether.fff.Fff idx (fff/create {:base-path (str dir) :watch? false})]
@@ -133,14 +137,17 @@
                                  :watch? false
                                  :custom-ignore-filenames [".rgignore"]
                                  :exclude-globs ["*.pem"]
-                                 :unignore-globs ["vendor/keep/**"]})]
+                                 :unignore-globs ["vendor/keep/**"
+                                                  ".cpcache/**"
+                                                  "src/.cpcache/**"]})]
           (is (fff/wait-for-scan idx 30000))
           (let [ps (paths idx)]
             (is (contains? ps "main.clj"))
             (is (contains? ps "vendor/keep/lib.clj"))
             (is (not (contains? ps "generated/out.clj")))
             (is (not (contains? ps "secret.pem")))
-            (is (not (contains? ps "vendor/drop/junk.clj")))))))))
+            (is (not (contains? ps "vendor/drop/junk.clj")))
+            (is (not-any? #(str/includes? % ".cpcache") ps))))))))
 
 (deftest grep-returns-native-context-lines
   (testing "context lines requested from fff-c reach Clojure instead of being dropped"
