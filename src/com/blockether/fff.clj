@@ -1,4 +1,3 @@
-
 (ns com.blockether.fff
   "Clojure binding to fff — fast typo-tolerant file/content search — through
    fff-c's C ABI using the JDK Foreign Function & Memory API."
@@ -29,8 +28,11 @@
   (nr/spec {:lib "fff" :version-resource "FFF_VERSION"}))
 
 (def ^AddressLayout ^:private addr ValueLayout/ADDRESS)
+
 (def ^ValueLayout$OfLong ^:private i64 ValueLayout/JAVA_LONG)
+
 (def ^ValueLayout$OfInt ^:private u32 ValueLayout/JAVA_INT)
+
 (def ^ValueLayout$OfBoolean ^:private bool ValueLayout/JAVA_BOOLEAN)
 
 (defonce ^:private handles
@@ -133,8 +135,11 @@
                :list-modified        [:i64 "fff_list_item_get_modified" :ptr]})))
 
 (defn- invoke [k & args] (apply nr/invoke @handles k args))
+
 (defn- null? [^MemorySegment p] (ffm/null? p))
+
 (defn- cstr [^MemorySegment p] (ffm/c-string p))
+
 (defn- native-bool [x] (if x true false))
 
 (defn- check-result [^MemorySegment result]
@@ -154,8 +159,11 @@
       (throw (ex-info (or err "fff error") {:type :fff/error})))))
 
 (defn- put-address! [^MemorySegment s off ^MemorySegment v] (.set s ^AddressLayout addr (long off) (or v MemorySegment/NULL)))
+
 (defn- put-bool! [^MemorySegment s off v] (.set s ^ValueLayout$OfBoolean bool (long off) (boolean v)))
+
 (defn- put-u64! [^MemorySegment s off v] (.set s ^ValueLayout$OfLong i64 (long off) (long (or v 0))))
+
 (defn- lines-cstr
   "Join a seq of overlay patterns into the newline-separated string the C ABI
   takes. nil/empty -> nil, so the field stays NULL."
@@ -166,6 +174,14 @@
 
 (defn- temp-cstr [^Arena arena x]
   (if (some? x) (.allocateFrom arena (str x)) MemorySegment/NULL))
+
+(def default-exclude-globs
+  "Default directory exclusions for `create`. Explicit `:exclude-globs` replaces
+   this list; use `[]` or nil to disable it. Native cache/VCS pruning still applies."
+  [".git/" "node_modules/" "target/" "build/" "dist/" "out/"
+   ".gradle/" ".m2/" "__pycache__/" ".venv/" ".shadow-cljs/"
+   "cljs-runtime/" "vendor/" ".next/" ".cpcache" ".clj-kondo"
+   ".calva" ".lsp" ".rift"])
 
 (defn create
   "Create and return an `Fff` instance. Options:
@@ -181,6 +197,8 @@
      itself; anything else must be opted in here.
    - `:exclude-globs` — gitignore-syntax patterns ALWAYS excluded, whatever the
      ignore files say and even when `:respect-ignore-files?` is false.
+     Defaults to `default-exclude-globs`; an explicit list replaces the defaults,
+     and `[]` or nil disables them (native cache/VCS pruning remains).
    - `:unignore-globs` — gitignore-syntax patterns RE-INCLUDED although an ignore
      file excludes them (a whitelist; `:exclude-globs` still wins). No-op when
      `:respect-ignore-files?` is false.
@@ -200,7 +218,8 @@
           enable-content-indexing? true
           watch? false
           ai-mode? false
-          respect-ignore-files? true}}]
+          respect-ignore-files? true
+          exclude-globs default-exclude-globs}}]
    (with-open [arena (Arena/ofConfined)]
      (let [opts (.allocate arena 112 8)]
        (.set opts ^ValueLayout$OfInt u32 0 (int create-options-version))

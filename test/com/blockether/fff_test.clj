@@ -103,6 +103,39 @@
           (is (contains? names "visible.clj"))
           (is (contains? names "hidden-by-ignore.clj")))))))
 
+(deftest default-exclude-globs
+  (let [^File dir (temp-dir "fff-default-excludes")
+        excluded [".git" "node_modules" "target" "build" "dist" "out"
+                  ".gradle" ".m2" "__pycache__" ".venv" ".shadow-cljs"
+                  "cljs-runtime" "vendor" ".next" ".cpcache" ".clj-kondo"
+                  ".calva" ".lsp" ".rift"]
+        paths (fn [idx]
+                (set (map :relative-path (:items (fff/glob idx {:pattern "**" :limit 500})))))]
+    (git-init! dir)
+    (spit (io/file dir ".gitignore") "repositories/\n")
+    (doseq [prefix ["" "repositories/app/"]
+            name (conj excluded "src")]
+      (let [file (io/file dir (str prefix name "/marker.clj"))]
+        (io/make-parents file)
+        (spit file "DEFAULTEXCLUDEMARKER\n")))
+    (doseq [respect? [true false]]
+      (testing (str "defaults prune root and re-included nested trees, respect=" respect?)
+        (with-open [^com.blockether.fff.Fff idx
+                    (fff/create {:base-path (str dir)
+                                 :respect-ignore-files? respect?
+                                 :unignore-globs ["repositories/**"]})]
+          (is (fff/wait-for-scan idx 30000))
+          (is (= #{"src/marker.clj" "repositories/app/src/marker.clj"}
+                 (set (filter #(str/ends-with? % "/marker.clj") (paths idx)))))
+          (is (= 2 (count (:matches (fff/grep idx {:query "DEFAULTEXCLUDEMARKER" :page-limit 100}))))))))
+    (doseq [excludes [[] nil ["src/"]]]
+      (testing (str "explicit excludes replace the defaults: " excludes)
+        (with-open [^com.blockether.fff.Fff idx
+                    (fff/create {:base-path (str dir) :exclude-globs excludes})]
+          (is (fff/wait-for-scan idx 30000))
+          (is (contains? (paths idx) "vendor/marker.clj"))
+          (is (= (empty? excludes) (contains? (paths idx) "src/marker.clj"))))))))
+
 (deftest ignore-overlay-options
   (testing "v4 create-options: custom ignore filenames, exclude + unignore globs"
     (let [^File dir (temp-dir "fff-overlay")

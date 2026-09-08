@@ -13,7 +13,7 @@ It loads fff's native `libfff_c` in-process through the JDK Foreign Function & M
 ## Install
 
 ```clojure
-com.blockether/fff {:mvn/version "0.12.6"}
+com.blockether/fff {:mvn/version "0.12.7"}
 ```
 
 Run the JVM with native access enabled:
@@ -33,11 +33,11 @@ The main jar is small and does **not** bundle every platform binary. At runtime 
 Published native artifacts use the same version as the main jar:
 
 ```clojure
-com.blockether/fff-native-linux-x64    {:mvn/version "0.12.6"}
-com.blockether/fff-native-linux-arm64  {:mvn/version "0.12.6"}
-com.blockether/fff-native-darwin-arm64 {:mvn/version "0.12.6"}
-com.blockether/fff-native-darwin-x64   {:mvn/version "0.12.6"}
-com.blockether/fff-native-windows-x64  {:mvn/version "0.12.6"}
+com.blockether/fff-native-linux-x64 {:mvn/version "0.12.7"}
+com.blockether/fff-native-linux-arm64 {:mvn/version "0.12.7"}
+com.blockether/fff-native-darwin-arm64 {:mvn/version "0.12.7"}
+com.blockether/fff-native-darwin-x64 {:mvn/version "0.12.7"}
+com.blockether/fff-native-windows-x64 {:mvn/version "0.12.7"}
 ```
 
 Linux artifacts are built on Debian Bullseye and require no symbols newer than
@@ -93,6 +93,20 @@ subtree does not silently vanish on the next filesystem event:
 ```
 
 Patterns use `.gitignore` syntax and resolve against `:base-path`.
+
+When `:exclude-globs` is omitted, `fff/default-exclude-globs` excludes these
+paths at any depth, including inside re-included subtrees:
+
+```text
+.git/ node_modules/ target/ build/ dist/ out/ .gradle/ .m2/
+__pycache__/ .venv/ .shadow-cljs/ cljs-runtime/ vendor/ .next/
+.cpcache .clj-kondo .calva .lsp .rift
+```
+
+An explicit `:exclude-globs` replaces this list; `[]` or `nil` disables these
+defaults. Native cache/VCS pruning still applies. To extend the defaults, use
+`(conj fff/default-exclude-globs "*.pem")`. These defaults apply to indexed
+search, glob and grep, not the stateless `list-directory` API.
 
 ### Listing a directory
 
