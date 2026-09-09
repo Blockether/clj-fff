@@ -1,9 +1,12 @@
 (ns com.blockether.fff-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [com.blockether.fff :as fff])
   (:import [java.io File]
+           [java.lang.foreign MemorySegment]
+           [java.lang.invoke MethodHandle]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
@@ -27,6 +30,22 @@
              (str/trim (slurp resource))))
       (is (nil? (io/resource "fff/VERSION")))
       (is (nil? (io/resource "VERSION"))))))
+
+(deftest native-downcalls-cover-bound-handles
+  ;; The JVM accepted list-directory, but a linked GraalVM image lacked its stub.
+  (let [metadata (json/read-str
+                  (slurp (io/resource "META-INF/native-image/com.blockether/fff/reachability-metadata.json"))
+                  :key-fn keyword)
+        carriers {MemorySegment "void*" Void/TYPE "void" Boolean/TYPE "jboolean"
+                  Byte/TYPE "jbyte" Integer/TYPE "jint" Long/TYPE "jlong"}
+        handles @(deref (ns-resolve 'com.blockether.fff 'handles))
+        descriptors (into #{}
+                          (map (fn [^MethodHandle handle]
+                                 (let [signature (.type handle)]
+                                   {:returnType (carriers (.returnType signature))
+                                    :parameterTypes (mapv carriers (.parameterArray signature))})))
+                          (vals handles))]
+    (is (= descriptors (set (get-in metadata [:foreign :downcalls]))))))
 
 (deftest binding-loads-and-searches
   (testing "real fff-c native binding: index, fuzzy search, glob, and grep"
