@@ -6,14 +6,14 @@ It loads fff's native `libfff_c` in-process through the JDK Foreign Function & M
 
 > ⚠️ This is a vendored binding. The native `libfff_c` is built from the
 > **Blockether fff fork**, pinned in one place — `resources/FFF_SOURCE`
-> (`Blockether/fff@v0.10.6-blockether.2`) — which both `scripts/build-natives.sh`
+> (`Blockether/fff@v0.11.0-blockether.1`) — which both `scripts/build-natives.sh`
 > and the CI/release workflows read. The fork adds `fff_rescan_blocking`, native
-> ignore overlays, and `FffCreateOptions` version 4 on top of upstream `v0.10.6`.
+> ignore overlays, and `FffCreateOptions` version 4 on top of upstream `v0.11.0`.
 
 ## Install
 
 ```clojure
-com.blockether/fff {:mvn/version "0.12.10"}
+com.blockether/fff {:mvn/version "0.12.11"}
 ```
 
 Run the JVM with native access enabled:
@@ -33,11 +33,11 @@ The main jar is small and does **not** bundle every platform binary. At runtime 
 Published native artifacts use the same version as the main jar:
 
 ```clojure
-com.blockether/fff-native-linux-x64 {:mvn/version "0.12.10"}
-com.blockether/fff-native-linux-arm64 {:mvn/version "0.12.10"}
-com.blockether/fff-native-darwin-arm64 {:mvn/version "0.12.10"}
-com.blockether/fff-native-darwin-x64 {:mvn/version "0.12.10"}
-com.blockether/fff-native-windows-x64 {:mvn/version "0.12.10"}
+com.blockether/fff-native-linux-x64 {:mvn/version "0.12.11"}
+com.blockether/fff-native-linux-arm64 {:mvn/version "0.12.11"}
+com.blockether/fff-native-darwin-arm64 {:mvn/version "0.12.11"}
+com.blockether/fff-native-darwin-x64 {:mvn/version "0.12.11"}
+com.blockether/fff-native-windows-x64 {:mvn/version "0.12.11"}
 ```
 
 Linux artifacts are built on Debian Bullseye and require no symbols newer than
