@@ -6,14 +6,14 @@ It loads fff's native `libfff_c` in-process through the JDK Foreign Function & M
 
 > ⚠️ This is a vendored binding. The native `libfff_c` is built from the
 > **Blockether fff fork**, pinned in one place — `resources/FFF_SOURCE`
-> (`Blockether/fff@v0.11.0-blockether.3`) — which both `scripts/build-natives.sh`
+> (`Blockether/fff@v0.11.0-blockether.4`) — which both `scripts/build-natives.sh`
 > and the CI/release workflows read. The fork adds `fff_rescan_blocking`, native
 > ignore overlays, and `FffCreateOptions` version 4 on top of upstream `main` after `v0.11.0`.
 
 ## Install
 
 ```clojure
-com.blockether/fff {:mvn/version "0.12.13"}
+com.blockether/fff {:mvn/version "0.12.14"}
 ```
 
 Run the JVM with native access enabled:
@@ -33,11 +33,11 @@ The main jar is small and does **not** bundle every platform binary. At runtime 
 Published native artifacts use the same version as the main jar:
 
 ```clojure
-com.blockether/fff-native-linux-x64 {:mvn/version "0.12.13"}
-com.blockether/fff-native-linux-arm64 {:mvn/version "0.12.13"}
-com.blockether/fff-native-darwin-arm64 {:mvn/version "0.12.13"}
-com.blockether/fff-native-darwin-x64 {:mvn/version "0.12.13"}
-com.blockether/fff-native-windows-x64 {:mvn/version "0.12.13"}
+com.blockether/fff-native-linux-x64 {:mvn/version "0.12.14"}
+com.blockether/fff-native-linux-arm64 {:mvn/version "0.12.14"}
+com.blockether/fff-native-darwin-arm64 {:mvn/version "0.12.14"}
+com.blockether/fff-native-darwin-x64 {:mvn/version "0.12.14"}
+com.blockether/fff-native-windows-x64 {:mvn/version "0.12.14"}
 ```
 
 Linux artifacts are built on Debian Bullseye and require no symbols newer than
@@ -122,6 +122,10 @@ filesystem root or a home directory — the two places `create` refuses to scan:
                      :respect-ignore-files? true      ; .gitignore/.ignore
                      :follow-symlinks? false})        ; list, never descend
 ```
+
+The options `:custom-ignore-filenames`, `:exclude-globs`, and `:unignore-globs`
+use the same rules as `create`. Listing has no default overlay exclusions.
+Use these options to preserve search ignore rules without building an index.
 
 Each entry is `{:relative-path :name :depth :dir? :size :modified}`, sorted by
 relative path.

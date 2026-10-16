@@ -124,6 +124,7 @@
                ;; instance, and therefore allowed in a filesystem ROOT or a HOME
                ;; directory, where `fff_create_instance_with` refuses to scan.
                :list-directory       [:ptr "fff_list_directory" :ptr :u32 :bool :bool :bool]
+               :list-directory-with  [:ptr "fff_list_directory_with" :ptr :u32 :bool :bool :bool :ptr :ptr :ptr]
                :free-list            [nil  "fff_free_list_result" :ptr]
                :list-count           [:u32 "fff_list_result_get_count" :ptr]
                :list-item            [:ptr "fff_list_result_get_item" :ptr :u32]
@@ -494,16 +495,23 @@
    cache-directory rules apply), `:follow-symlinks?` (default false — a symlinked
    directory is listed but never descended).
 
+   `:custom-ignore-filenames`, `:exclude-globs`, and `:unignore-globs` use the
+   same rules as `create`. Listing has no default overlay exclusions.
+
    Returns a vector of `{:relative-path :name :depth :dir? :size :modified}`.
    Throws when `path` is missing or is not a directory."
   ([path] (list-directory path {}))
-  ([path {:keys [max-depth include-hidden? respect-ignore-files? follow-symlinks?]
+  ([path {:keys [max-depth include-hidden? respect-ignore-files? follow-symlinks?
+                 custom-ignore-filenames exclude-globs unignore-globs]
           :or {max-depth 1 include-hidden? false respect-ignore-files? true follow-symlinks? false}}]
    (with-open [arena (Arena/ofConfined)]
      (let [result (:handle (check-result
-                            (invoke :list-directory (temp-cstr arena path)
+                            (invoke :list-directory-with (temp-cstr arena path)
                                     (int max-depth) (boolean include-hidden?)
-                                    (boolean respect-ignore-files?) (boolean follow-symlinks?))))]
+                                    (boolean respect-ignore-files?) (boolean follow-symlinks?)
+                                    (temp-cstr arena (lines-cstr custom-ignore-filenames))
+                                    (temp-cstr arena (lines-cstr exclude-globs))
+                                    (temp-cstr arena (lines-cstr unignore-globs)))))]
        (try
          (vec (for [i (range (invoke :list-count result))]
                 (list-item (invoke :list-item result (int i)))))

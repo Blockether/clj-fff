@@ -248,6 +248,29 @@
         (is (pos? (:size (get by-path "alpha.clj"))))
         (is (pos? (:modified (get by-path "alpha.clj"))))))))
 
+(deftest list-directory-ignore-overlay
+  ;; Cold Vis listings need the same ignore rules without a content index.
+  (let [^File dir (temp-dir "fff-list-overlay")
+        names (fn [opts] (set (map :relative-path (fff/list-directory (str dir) opts))))
+        overlay {:custom-ignore-filenames [".rgignore"]
+                 :exclude-globs ["blocked/" "*.secret"]
+                 :unignore-globs ["vendor/**"]}]
+    (git-init! dir)
+    (spit (io/file dir ".gitignore") "vendor/\n")
+    (spit (io/file dir ".rgignore") "hidden.txt\n")
+    (.mkdirs (io/file dir "vendor" "deep"))
+    (.mkdirs (io/file dir "blocked"))
+    (doseq [path ["visible.txt" "hidden.txt" "key.secret" "vendor/keep.txt"
+                  "vendor/deep/leaf.txt" "blocked/skip.txt"]]
+      (spit (io/file dir path) "data\n"))
+    (is (= #{"visible.txt" "vendor"} (names overlay)))
+    (is (= #{"visible.txt" "vendor" "vendor/keep.txt" "vendor/deep"}
+           (names (assoc overlay :max-depth 2))))
+    (is (contains? (names (assoc overlay :max-depth 3)) "vendor/deep/leaf.txt"))
+    (is (not (contains? (names (assoc overlay :respect-ignore-files? false)) "blocked")))
+    (is (contains? (names (assoc overlay :respect-ignore-files? false)) "hidden.txt"))
+    (is (contains? (names {}) "hidden.txt"))))
+
 (deftest list-directory-in-a-filesystem-root-or-home
   (testing "the places an fff INDEX refuses: listing them still works"
     (is (seq (fff/list-directory "/")))
